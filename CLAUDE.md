@@ -68,5 +68,7 @@ ES modules, no build step. Family only: a passcode, asked once per device.
   Boat List → map, device count; iPhone 17 Pro and an 1100 px desktop window.
 
 ## Deploy
-Not published yet (waiting for Louie's OK). Plan: public repo Louiebo1/seatemp → GitHub
-Pages https://louiebo1.github.io/seatemp/ (`~/bin/gh`). Nothing secret is in the repo.
+Live at https://louiebo1.github.io/seatemp/ since 2026-10-23 — GitHub Pages from `main`
+(public repo Louiebo1/seatemp; `~/bin/gh`). Page: commit and `git push` (about a minute).
+Relay: `relay/deploy.sh` (bump VERSION). Nothing secret is in the repo. Test devices
+were removed from the count at launch (count 0); the alert email was tested 2026-10-23.
