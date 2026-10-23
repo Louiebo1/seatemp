@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a2540">
+  <title>Sea Temp</title>
+  <link rel="icon" href="img/favicon.png">
+  <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Sea Temp">
+  <meta name="description" content="Sea surface temperature maps for California and Baja, with party boats and fishing spots.">
+  <meta name="robots" content="noindex">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app" hidden>
+    <nav id="regions" class="segmented" aria-label="Map"></nav>
+    <div id="daybar" class="bar">
+      <button id="prev" class="round" aria-label="Day before"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" d="M14.5 6l-6 6 6 6"/></svg></button>
+      <div class="day"><div id="day">—</div><div id="dayNote" class="note"> </div></div>
+      <span id="spinner" class="spinner" hidden></span>
+      <button id="next" class="round" aria-label="Next day"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" d="M9.5 6l6 6-6 6"/></svg></button>
+      <button id="newest" class="round" aria-label="Newest map"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" d="M19 12a7 7 0 1 1-2.05-4.95M19 4v4h-4"/></svg></button>
+    </div>
+    <div id="boatbar" class="bar">
+      <label class="pick"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 3h6v3h3l1 5H5l1-5h3zM3 13h18l-2.2 5.2c-.6-.1-1.2-.4-1.8-.8-1.6 1.1-3.4 1.1-5 0-1.6 1.1-3.4 1.1-5 0-.6.4-1.2.7-1.8.8z"/><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" d="M3 21c1.5 0 2.2-.9 3-.9s1.5.9 3 .9 2.2-.9 3-.9 1.5.9 3 .9 2.2-.9 3-.9 1.5.9 3 .9"/></svg><span class="shown"></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" d="M7 10l5 5 5-5"/></svg>
+        <select id="mode" aria-label="Live boats">
+          <option value="party">Party Boats</option>
+          <option value="fishing">Fishing + Party Boats</option>
+          <option value="all">All Boats</option>
+          <option value="off">Boats Off</option>
+        </select>
+      </label>
+      <label class="pick pinkicon"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 3l9 9-9 9-9-9z"/></svg><span class="shown"></span><svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" d="M7 10l5 5 5-5"/></svg>
+        <select id="span" aria-label="Fishing history">
+          <option value="7">History: 7 days</option>
+          <option value="14">History: 14 days</option>
+          <option value="0">History off</option>
+        </select>
+      </label>
+      <span class="grow"></span>
+      <button id="listButton" class="link"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="currentColor"><circle cx="4.5" cy="6" r="1.7"/><circle cx="4.5" cy="12" r="1.7"/><circle cx="4.5" cy="18" r="1.7"/><rect x="8.5" y="5" width="12" height="2.2" rx="1.1"/><rect x="8.5" y="10.9" width="12" height="2.2" rx="1.1"/><rect x="8.5" y="16.8" width="12" height="2.2" rx="1.1"/></g></svg>Boat List</button>
+      <button id="infoButton" class="round small" aria-label="About">i</button>
+    </div>
+    <div id="feeds" class="feeds"></div>
+    <div id="mapbox">
+      <canvas id="map"></canvas>
+      <div id="mapMessage" class="message" hidden></div>
+    </div>
+    <div id="readout" class="readout"></div>
+    <div id="legend" class="legend"><div class="ramp"></div><div class="ticks"></div></div>
+    <p id="credit" class="credit"></p>
+  </div>
+
+  <div id="lock" class="sheet" hidden>
+    <form id="lockForm" class="card">
+      <img src="img/apple-touch-icon.png" alt="" width="72" height="72">
+      <h1>Sea Temp</h1>
+      <p>Enter the family passcode.</p>
+      <input id="passcode" type="password" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Passcode" required>
+      <p id="lockError" class="error" hidden></p>
+      <button class="primary" type="submit">Unlock</button>
+      <p class="small">Asked once on each device.</p>
+    </form>
+  </div>
+
+  <div id="list" class="sheet" hidden>
+    <div class="card wide">
+      <header><h2>Party Boats</h2><button class="link" data-close>Done</button></header>
+      <input id="search" type="search" placeholder="Boat, landing or town" autocomplete="off">
+      <div id="listBody" class="scroll"></div>
+    </div>
+  </div>
+
+  <div id="info" class="sheet" hidden>
+    <div class="card wide">
+      <header><h2>About Sea Temp</h2><button class="link" data-close>Done</button></header>
+      <div id="infoBody" class="scroll"></div>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
