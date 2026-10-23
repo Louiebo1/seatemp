@@ -33,7 +33,8 @@ ES modules, no build step. Family only: a passcode, asked once per device.
     `/alert-test`, `/forget` (this device).
   - A running Durable Object keeps the code it started with, even after a deploy (found
     2026-10-23: a hub kept old code for 10+ minutes while being polled). So every Hub
-    call carries `X-Version: VERSION`; a Hub on other code saves and `state.abort()`s, and
+    call carries `X-Version: VERSION-<hash of the secrets>` (a secret change needs a restart
+    too); a Hub on other code saves and `state.abort()`s, and
     the worker retries once. **Bump `VERSION` in worker.js on every relay change.** The Hub
     is `idFromName('hub2')` (the first one, 'hub', ran pre-fix code; only test data).
   - CORS: https://louiebo1.github.io and http://127.0.0.1:8765 / localhost:8765 only.

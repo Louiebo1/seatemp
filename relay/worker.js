@@ -17,7 +17,7 @@ const ALLOWED_ORIGINS = ['https://louiebo1.github.io', 'http://127.0.0.1:8765', 
 const ERDDAP = 'https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41';
 const ALERT_AFTER = 20;
 /** Bumped on every change, so /hello shows which code is answering. */
-const VERSION = 6;
+const VERSION = 7;
 
 export default {
   async fetch(request, env) {
@@ -106,13 +106,25 @@ async function route(request, env) {
  *  call fails), and the call is made once more, to the new code. */
 async function hubFetch(env, url, init) {
   const stub = () => env.HUB.get(env.HUB.idFromName('hub2'));
-  const headers = { ...(init.headers || {}), 'X-Version': String(VERSION) };
+  const headers = { ...(init.headers || {}), 'X-Version': await codeAndSecrets(env) };
   const body = init.body;
   try {
     return await stub().fetch(url, { ...init, headers, body });
   } catch (e) {
     return await stub().fetch(url, { ...init, headers, body });
   }
+}
+
+/** This code's version plus a fingerprint of the secrets (a hash; never the secrets), so a
+ *  Hub restarts after a secret changes too. */
+let fingerprint = null;
+async function codeAndSecrets(env) {
+  if (!fingerprint) {
+    const all = ['PASSCODE', 'AIS_KEY', 'GFW_TOKEN', 'RESEND_KEY'].map(k => env[k] || '').join('\n');
+    const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(all)));
+    fingerprint = `${VERSION}-${[...hash.slice(0, 6)].map(b => b.toString(16).padStart(2, '0')).join('')}`;
+  }
+  return fingerprint;
 }
 
 const normalize = s => String(s || '').toLowerCase().replace(/\s+/g, '');
@@ -170,7 +182,7 @@ export class Hub {
 
   async fetch(request) {
     const wanted = request.headers.get('X-Version');
-    if (wanted && wanted !== String(VERSION)) {
+    if (wanted && wanted !== await codeAndSecrets(this.env)) {
       if (this.fleet) await this.save();
       if (this.ws) { try { this.ws.close(1012, 'restarting'); } catch {} }
       this.state.abort('newer code deployed');
