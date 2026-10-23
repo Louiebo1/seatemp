@@ -31,6 +31,11 @@ ES modules, no build step. Family only: a passcode, asked once per device.
     (louiebo@comcast.net, a plain binding) once through Resend
     (`onboarding@resend.dev` → only the Resend account's own address). `/stats`,
     `/alert-test`, `/forget` (this device).
+  - A running Durable Object keeps the code it started with, even after a deploy (found
+    2026-10-23: a hub kept old code for 10+ minutes while being polled). So every Hub
+    call carries `X-Version: VERSION`; a Hub on other code saves and `state.abort()`s, and
+    the worker retries once. **Bump `VERSION` in worker.js on every relay change.** The Hub
+    is `idFromName('hub2')` (the first one, 'hub', ran pre-fix code; only test data).
   - CORS: https://louiebo1.github.io and http://127.0.0.1:8765 / localhost:8765 only.
   - Deploy: `relay/deploy.sh` (uploads worker.js + js/party.js + js/regions-data.js;
     the Durable Object migration only on the very first upload; keeps secrets).
@@ -57,7 +62,8 @@ ES modules, no build step. Family only: a passcode, asked once per device.
   `window.__seatemp` exposes state for scripted checks (headless Chrome with its own
   `--user-data-dir`, a same-origin iframe harness, `--dump-dom`). Phone layout: the iPhone
   simulator's Safari. Remove test devices afterwards (`/forget` with their token).
-- Checked 2026-10-23: four maps (scales match the app), tap readout, party matching,
+- Checked 2026-10-23: live boats through the relay (~160 in 2 min; Toronado, New Del Mar,
+  Victory, Ocean Odyssey, Top Gun 80 named), 31 GFW spots in 7 days; four maps (scales match the app), tap readout, party matching,
   Boat List → map, device count; iPhone 17 Pro and an 1100 px desktop window.
 
 ## Deploy

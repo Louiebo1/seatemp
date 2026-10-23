@@ -16,6 +16,8 @@ import { partyOf } from './party.js';
 const ALLOWED_ORIGINS = ['https://louiebo1.github.io', 'http://127.0.0.1:8765', 'http://localhost:8765'];
 const ERDDAP = 'https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41';
 const ALERT_AFTER = 20;
+/** Bumped on every change, so /hello shows which code is answering. */
+const VERSION = 6;
 
 export default {
   async fetch(request, env) {
@@ -42,7 +44,7 @@ export default {
 async function route(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
-  const hub = () => env.HUB.get(env.HUB.idFromName('hub'));
+  const hub = () => ({ fetch: (u, init = {}) => hubFetch(env, u, init) });
 
   if (path === '/unlock' && request.method === 'POST') {
     const body = await request.json().catch(() => ({}));
@@ -99,6 +101,20 @@ async function route(request, env) {
   return json({ error: 'Not found' }, 404);
 }
 
+/** A call to the Hub. A running Hub keeps the code it started with, even after a deploy:
+ *  every call says which version is current, a Hub on older code restarts itself (its
+ *  call fails), and the call is made once more, to the new code. */
+async function hubFetch(env, url, init) {
+  const stub = () => env.HUB.get(env.HUB.idFromName('hub2'));
+  const headers = { ...(init.headers || {}), 'X-Version': String(VERSION) };
+  const body = init.body;
+  try {
+    return await stub().fetch(url, { ...init, headers, body });
+  } catch (e) {
+    return await stub().fetch(url, { ...init, headers, body });
+  }
+}
+
 const normalize = s => String(s || '').toLowerCase().replace(/\s+/g, '');
 
 async function tokenFor(device, env) {
@@ -153,6 +169,12 @@ export class Hub {
   }
 
   async fetch(request) {
+    const wanted = request.headers.get('X-Version');
+    if (wanted && wanted !== String(VERSION)) {
+      if (this.fleet) await this.save();
+      if (this.ws) { try { this.ws.close(1012, 'restarting'); } catch {} }
+      this.state.abort('newer code deployed');
+    }
     const url = new URL(request.url);
     const device = request.headers.get('X-Device');
     if (device && url.pathname !== '/forget') await this.touch(device);
@@ -162,7 +184,7 @@ export class Hub {
       case '/attempt': return this.attempt(await request.json());
       case '/register': return this.register(await request.json());
       case '/stats': return this.stats();
-      case '/hello': return json({ ok: true });
+      case '/hello': return json({ ok: true, version: VERSION });
       case '/alert-test': return json(await this.sendAlert(0, true));
       case '/forget': await this.state.storage.delete(`device:${device}`); return json({ ok: true });
     }
@@ -298,7 +320,8 @@ export class Hub {
     const devices = [...(await this.state.storage.list({ prefix: 'device:' })).values()]
       .map(d => ({ first: d.first, last: d.last, label: d.label })).sort((a, b) => a.first - b.first);
     return json({ count: devices.length, alertAfter: ALERT_AFTER, alerted: await this.state.storage.get('alerted') || null,
-                  emailReady: !!this.env.RESEND_KEY, devices });
+                  emailReady: !!this.env.RESEND_KEY,
+                  keys: { ais: (this.env.AIS_KEY || '').length, gfw: (this.env.GFW_TOKEN || '').length }, devices });
   }
 
   async sendAlert(count, test = false) {
