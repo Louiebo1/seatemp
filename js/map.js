@@ -7,6 +7,7 @@ import { stretchKnots, kindOf, atDock, GAP, MAX_GAP } from './trails.js';
 
 const STALE = 15 * 60e3;      // Boats not heard from in this long are drawn faded.
 const PINK = 'rgb(242, 51, 191)';
+const LAND_COLOR = 'rgb(204, 196, 173)';
 
 export class MapView {
   constructor(canvas, { onPick }) {
@@ -97,8 +98,10 @@ export class MapView {
     ctx.imageSmoothingQuality = 'medium';
     ctx.drawImage(this.map.canvas, L.x0, L.y0, L.w, L.h);
 
-    // Isotherms, in grid units.
+    // Isotherms, in grid units — and everything over the map, only over the map itself
+    // (the coastline data reaches a little past its edges).
     ctx.save();
+    ctx.beginPath(); ctx.rect(L.x0, L.y0, L.w, L.h); ctx.clip();
     ctx.translate(L.x0, L.y0);
     ctx.scale(L.sx, L.sy);
     const unit = 1 / Math.sqrt(L.sx * L.sy);
@@ -108,6 +111,20 @@ export class MapView {
     ctx.lineWidth = 1.3 * unit;
     ctx.strokeStyle = 'rgba(0,0,0,0.6)';
     ctx.stroke(this.map.major);
+    // The detailed coastline (about 15 m), crisp at any zoom, over the 1-km water.
+    if (this.map.land) {
+      ctx.fillStyle = LAND_COLOR;
+      ctx.fill(this.map.land, 'nonzero');
+      ctx.lineWidth = 0.9 * unit;
+      ctx.strokeStyle = 'rgba(70,60,40,0.55)';
+      ctx.stroke(this.map.land);
+    }
+    // Hidden boxes (Baja's Gulf of California) stay blank like land.
+    ctx.fillStyle = LAND_COLOR;
+    for (const b of this.region.hidden || []) {
+      const g = this.map.grid, x = g.col(b.west) + 0.5, y = g.row(b.north) + 0.5;
+      ctx.fillRect(x, y, (b.east - b.west) / g.cell, (b.north - b.south) / g.cell);
+    }
     ctx.restore();
 
     const on = (lat, lon) => this.region.covers(lat, lon);

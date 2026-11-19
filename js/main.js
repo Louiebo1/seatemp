@@ -4,6 +4,7 @@
 import { REGIONS, regionById, regionContaining, describe, position } from './regions.js';
 import { parseESRIAscii, parseLandMask } from './grid.js';
 import { renderMap, STOPS } from './render.js';
+import { COAST } from './coast-data.js';
 import { MapView } from './map.js';
 import { PARTY_BOATS, partyOf as partyByName } from './party.js';
 import { mergeTrails, fishingSeconds } from './trails.js';
@@ -138,7 +139,7 @@ async function show(day) {
       ]);
       masks.set(region.id, land);
       if (ticket !== request) return;
-      const rendered = renderMap(parseESRIAscii(grid).masked(land).hiding(region.hidden));
+      const rendered = renderMap(parseESRIAscii(grid).masked(land).hiding(region.hidden), { hidden: region.hidden, coast: COAST[region.id] || [] });
       if (!rendered) throw new Error('That map came back empty.');
       map = { ...rendered, region: region.id, day };
       maps.set(key, map);

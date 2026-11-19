@@ -68,7 +68,14 @@ ES modules, no build step. Family only: a passcode, asked once per device.
   faster = thin white; dotted across a 30 min–6 h silence; dock points skipped), merging,
   "fished X in the last 12 h". Trails setting `seatemp.trails` (12/24/72 h, 0 = tapped boat only).
 - `js/grid.js`, `js/render.js` — ports of SSTGrid / SSTRenderer (palette, scale,
-  marching-squares isotherms).
+  marching-squares isotherms). Since 2026-11-19 the water image is upsampled (up to 6 px
+  per 1-km cell, ≤2400 px wide, bilinear between readings, skipping land) after the water
+  is "bled" 6 cells under MUR's land so it meets the detailed coastline; land is drawn
+  over it as a vector path. Same in the app's SSTRenderer.
+- `js/coast-data.js` — land polygons per region from GSHHG full resolution (level 1),
+  clipped to each box + 0.05°, simplified to ~15 m; made by `tools/coast_from_gshhg.py`
+  (download instructions in it; NOAA's NGDC link is dead, use soest.hawaii.edu), which
+  also writes the app's `SeaTemp/coast.json`. Drawn after the isotherms, clipped to the map.
 - `js/map.js` — canvas map: pinch/scroll zoom about the fingers, drag, double-tap to fit,
   tap → water / boat (22 px) / fishing spot (14 px). Place names on their `side`.
 - `js/api.js` — relay calls, unlock, forget. `js/main.js` — screens, polling (boats every
@@ -77,6 +84,10 @@ ES modules, no build step. Family only: a passcode, asked once per device.
 - Icons are drawn (inline SVG) — iPhone fonts lack ⛴ ◆ ☰ ⟳. `img/` icons are the app's.
 
 ## Test
+- Headless Chrome on the Mac won't go narrower than 500 px: check phone layout in the iPhone
+  simulator's Safari (`xcrun simctl openurl SIM http://127.0.0.1:8765/#auth=…`).
+- A scripted end-to-end pass (all maps, days, taps, boat modes, trails, list, history,
+  About; errors collected) was run against the live relay 2026-11-19: no errors.
 - Serve: `python3 nocache.py 8765 DIR` (a no-store static server) — port 8765 is the one the
   relay accepts. On 127.0.0.1 only, `#auth=DEVICE.TOKEN` signs in as a test device and
   `window.__seatemp` exposes state for scripted checks (headless Chrome with its own
