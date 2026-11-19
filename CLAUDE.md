@@ -24,8 +24,17 @@ ES modules, no build step. Family only: a passcode, asked once per device.
     the four boxes only (`regions-data.js`), retried once on NOAA's occasional 522.
     Browser-cached (`private, max-age`); the Cache API does nothing on workers.dev.
   - The Hub (one Durable Object, SQLite-backed — the free plan's kind): holds the
-    aisstream websocket while anyone has asked for `/boats` in the last 3 minutes (alarm
-    every minute; saves the fleet), keeps boats 2 h (party boats 24 h); `/history?days=7|14`
+    aisstream websocket **around the clock** (since 2026-11-19; alarm every minute
+    reconnects; storage written every 5 minutes to stay well under the free plan's 100k row
+    writes a day; always-on ≈ 11,000 of the free 13,000 GB-s a day — watch it), keeps boats
+    2 h (party boats 24 h). Party boats' tracks: `trail:<mmsi>` = [[sec, lat, lon, kn]…],
+    72 h, a point a minute at most (every 10 min sitting still); `/trails?since=ms` (only
+    boats that are party boats now). Pins (`pins`: name key → {mmsi, seen, known}): a party
+    boat's transponder, learned the first time a boat with the name is heard within 3 nm of
+    its home harbor (`HOMES` in party.js), re-pinnable after 14 silent days; `KNOWN_PINS`
+    (fishing-reports.ai's fleet list + Excel, Searcher, American Angler) always win. `/boats`
+    and `/trails` send `pins`; `partyOf(boat, pins)` uses them. `/wake` (no auth) starts it;
+    deploy.sh calls it. `/history?days=7|14`
     caches GFW events 6 h (GFW answers 201); counts devices (`device:<id>` → first, last,
     label like "iPhone · Safari"); when the count passes 20 it emails ALERT_EMAIL
     (louiebo@comcast.net, a plain binding) once through Resend
@@ -45,9 +54,14 @@ ES modules, no build step. Family only: a passcode, asked once per device.
 - `js/regions-data.js` — generated from the app's `Region.swift` by
   `tools/regions_from_app.py` (edit the app, then regenerate). `js/regions.js` — covers
   (hidden boxes), describe ("8 nm SW of …"), position.
-- `js/party.js` — the 123 party boats and `partyOf(boat)` (same rule as the app: not
-  cargo/tanker/tug/sailing/pleasure types, not MMSI 338…, not north of 34.9°N); shared
-  with the relay. Regenerate the list with `tools/party_from_app.py`.
+- `js/party.js` — the 124 party boats and `partyOf(boat, pins)` (same rule as the app:
+  pinned transponder first; else by name unless cargo/tanker/tug/sailing/pleasure type, MMSI
+  338… that doesn't say fishing/passenger (Excel and Horizon are 338), or north of
+  34.9°N); `KNOWN_PINS`, `HOMES`; shared with the relay. Regenerate the list with
+  `tools/party_from_app.py` (KNOWN_PINS is hand-kept, same as the app's `knownPins`).
+- `js/trails.js` — trail speed classes (≤4 kn fishing = thick pink, ≤10 trolling = yellow,
+  faster = thin white; dotted across a 30 min–6 h silence; dock points skipped), merging,
+  "fished X in the last 12 h". Trails setting `seatemp.trails` (12/24/72 h, 0 = tapped boat only).
 - `js/grid.js`, `js/render.js` — ports of SSTGrid / SSTRenderer (palette, scale,
   marching-squares isotherms).
 - `js/map.js` — canvas map: pinch/scroll zoom about the fingers, drag, double-tap to fit,

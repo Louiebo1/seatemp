@@ -5,13 +5,17 @@ import { REGIONS, regionById, regionContaining, describe, position } from './reg
 import { parseESRIAscii, parseLandMask } from './grid.js';
 import { renderMap, STOPS } from './render.js';
 import { MapView } from './map.js';
-import { PARTY_BOATS, partyOf } from './party.js';
+import { PARTY_BOATS, partyOf as partyByName } from './party.js';
+import { mergeTrails, fishingSeconds } from './trails.js';
 import { call, unlock, forget, isUnlocked, Locked } from './api.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const pref = (key, fallback) => { try { return localStorage.getItem('seatemp.' + key) ?? fallback; } catch { return fallback; } };
 const setPref = (key, value) => { try { localStorage.setItem('seatemp.' + key, value); } catch { /* this visit only */ } };
+
+/** The party boats a boat is, with the relay's transponder pins. */
+const partyOf = b => partyByName(b, state.pins);
 
 const ICON = {
   boat: document.querySelector('#boatbar .pick svg').outerHTML.replace('<svg', '<svg class="icon"'),
@@ -28,12 +32,17 @@ const state = {
   mode: pref('mode', 'party'),
   span: Number(pref('span', '7')),
   fleet: [],             // every boat the relay has (mode filters what's drawn)
+  pins: {},              // name key → transponder (MMSI), from the relay
+  trails: new Map(),     // mmsi → [[seconds, lat, lon, knots], …], the last 72 hours
+  trailsAt: 0,           // when the relay last sent trails (ms)
+  trailsAsked: 0,
+  trailHours: Number(pref('trails', '12')),
   boatStatus: 'connecting',
   history: { status: 'loading', events: [] },
   picked: null,
 };
 
-const view = new MapView($('map'), { onPick: p => { state.picked = p; drawPicked(); renderReadout(); } });
+const view = new MapView($('map'), { onPick: p => { state.picked = p; drawLayers(); renderReadout(); } });
 const masks = new Map();       // region id → land mask
 const maps = new Map();        // `${region}/${day}` → rendered map (the last few)
 let request = 0;
@@ -47,6 +56,7 @@ function start() {
   buildRegions();
   $('mode').value = state.mode;
   $('span').value = String(state.span);
+  $('trails').value = String(state.trailHours);
   showChoices();
   show(null);
   pollBoats();
@@ -188,7 +198,7 @@ function renderLegend() {
 
 /** The menus show their current choice (the <select>s themselves are invisible). */
 function showChoices() {
-  for (const id of ['mode', 'span']) {
+  for (const id of ['mode', 'trails', 'span']) {
     const select = $(id);
     select.parentElement.querySelector('.shown').textContent = select.options[select.selectedIndex].text;
   }
@@ -207,6 +217,19 @@ async function pollBoats() {
     const data = await (await call('/boats')).json();
     state.fleet = data.boats;
     state.boatStatus = data.status;
+    if (data.pins) state.pins = data.pins;
+    // Trails: all 72 hours the first time, then what's new, at most every minute.
+    if (Date.now() - state.trailsAsked > 60e3) {
+      state.trailsAsked = Date.now();
+      try {
+        const t = await (await call(`/trails?since=${state.trailsAt ? state.trailsAt - 5 * 60e3 : 0}`)).json();
+        mergeTrails(state.trails, t.trails);
+        state.trailsAt = t.at;
+        if (t.pins) state.pins = t.pins;
+      } catch (error) {
+        if (error instanceof Locked) throw error;     // Trails are extra: the boats still show.
+      }
+    }
   } catch (error) {
     if (handle(error)) return;
     state.boatStatus = 'unreachable';
@@ -229,6 +252,32 @@ function shownBoats() {
     default: return [];
   }
 }
+
+/** The trails to draw: each shown party boat's last `trailHours` (the picked boat's all 72). */
+function shownTrails() {
+  if (state.mode === 'off') return [];
+  const picked = state.picked && state.picked.kind === 'boat' ? state.picked.id : null;
+  const from = Date.now() / 1000 - state.trailHours * 3600;
+  const out = [];
+  for (const b of shownBoats()) {
+    const points = state.trails.get(b.mmsi);
+    const parties = partyOf(b);
+    if (!points || !parties.length) continue;
+    const mine = b.mmsi === picked;
+    if (!mine && !state.trailHours) continue;
+    const recent = mine ? points : points.filter(p => p[0] >= from);
+    // End the line at the boat itself.
+    if (recent.length) out.push({ mmsi: b.mmsi, parties, points: [...recent, [b.seen / 1000, b.lat, b.lon, b.sog]] });
+  }
+  return out;
+}
+
+$('trails').onchange = () => {
+  state.trailHours = Number($('trails').value);
+  setPref('trails', state.trailHours);
+  showChoices();
+  drawLayers();
+};
 
 $('mode').onchange = () => {
   state.mode = $('mode').value;
@@ -269,7 +318,7 @@ $('span').onchange = () => {
 // --- The map's layers, the status line, the readout -----------------------------------
 
 function drawLayers() {
-  view.set({ boats: shownBoats(), events: state.span ? state.history.events || [] : [] });
+  view.set({ pins: state.pins, boats: shownBoats(), trails: shownTrails(), events: state.span ? state.history.events || [] : [] });
   drawPicked();
 }
 
@@ -325,7 +374,13 @@ function boatReadout(b) {
   const details = [party.length ? party.map(p => p.landing).join(' or ') : typeName(b.type)];
   if (b.sog != null) details.push(`${b.sog.toFixed(1)} kn`);
   if (b.cog != null && (b.sog || 0) > 0.5) details.push(`${String(Math.round(b.cog)).padStart(3, '0')}°`);
-  details.push(ago < 1 ? 'just now' : `${ago} min ago`);
+  details.push(ago < 1 ? 'just now' : ago < 60 ? `${ago} min ago` : `${Math.floor(ago / 60)} h ${ago % 60} min ago`);
+  const points = party.length && state.trails.get(b.mmsi);
+  if (points && points.length > 1) {
+    const day = points.filter(p => p[0] >= Date.now() / 1000 - 12 * 3600);
+    const s = fishingSeconds(day, party);
+    if (s >= 600) details.push(`fished ${s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.round(s % 3600 / 60)} min` : `${Math.round(s / 60)} min`} in the last 12 h`);
+  }
   const color = party.length ? 'yellow' : b.type === 30 ? 'orange' : 'muted';
   return `<div><span class="${color}">${ICON.boat}</span> <b>${esc(party.length ? party[0].name : b.name || `MMSI ${b.mmsi}`)}</b>${temp != null ? ` <b class="mono">${temp.toFixed(1)}°F</b>` : ''}</div>
           <div class="small muted">${esc(details.join(' · '))}</div>`;
@@ -374,7 +429,7 @@ function renderList() {
     ${heard.map(p => heardRow(p, heardBy.get(p))).join('')}
     <h3>Not heard today · ${quiet.length}</h3>
     ${quiet.map(p => `<div class="row quiet"><b>${esc(p.name)}</b><div class="small">${esc(p.landing)} · ${esc(p.city)}</div></div>`).join('')}
-    <p class="small muted">At the dock with the AIS off, out of a shore receiver’s range, or not carrying AIS. Boat list: every boat that posted fish counts from a Southern California landing in the past year (SanDiegoFishReports.com, SoCalFishReports.com), plus San Diego’s long-range fleet. Matched to AIS by name.</p>`;
+    <p class="small muted">At the dock with the AIS off, out of a shore receiver’s range, or not carrying AIS. Boat list: every boat that posted fish counts from a Southern California landing in the past year (SanDiegoFishReports.com, SoCalFishReports.com), plus San Diego’s long-range fleet. Matched to AIS by name, then pinned to the boat’s own transponder (the first one heard under that name near its home harbor, or fishing-reports.ai’s fleet list), so a same-named boat elsewhere isn’t mixed up with it.</p>`;
 }
 
 function heardRow(p, b) {
@@ -427,6 +482,7 @@ $('infoButton').onclick = async () => {
 function aboutText(devices) {
   return `<p>Sea surface temperature for Monterey Bay, Morro Bay, Southern California and Baja, from NASA JPL’s MUR analysis (satellites blended, about 1 km, daily — about a day behind) via NOAA CoastWatch.</p>
     <p><b>Boats</b>: live AIS positions from aisstream.io’s shore receivers. Yellow with a name = a Southern California party boat; orange = a fishing boat; white = others; faded = not heard in 15 minutes.</p>
+    <p><b>Trails</b>: where each party boat has been (Sea Temp listens around the clock and keeps 72 hours). <b class="pink">Thick pink</b> = 4 knots or slower away from its dock: fishing (drifting, anchored or slow-trolling a spot). <b class="yellow">Yellow</b> = trolling or moving between spots (to 10 kn). White = running. Dotted = a silence (out of a shore receiver’s range). Tap a boat for its whole 72 hours.</p>
     <p><b class="pink">${ICON.diamond} Fishing history</b>: where vessels fished in the last 7 or 14 days, from Global Fishing Watch (satellite AIS too, so offshore; about 4 days behind; mostly commercial boats).</p>
     ${devices}
     <p><button id="forget" class="link danger">Forget this device</button> <span class="small muted">— it will ask for the passcode again.</span></p>`;

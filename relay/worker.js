@@ -6,18 +6,19 @@
 //   is asked again.
 // - Passes NOAA's temperature maps through (NOAA sends no CORS headers, so a page can't
 //   read them itself), only for the four maps.
-// - The Hub (one Durable Object) listens to aisstream while anyone is looking, keeps the
-//   fleet, caches Global Fishing Watch's fishing events for 6 hours, and counts devices:
+// - The Hub (one Durable Object) listens to aisstream around the clock, keeps the fleet
+//   and the party boats' last 72 hours of track, pins each party boat to its transponder,
+//   caches Global Fishing Watch's fishing events for 6 hours, and counts devices:
 //   when more than ALERT_AFTER have unlocked, it emails ALERT_EMAIL once (Resend).
 
 import { REGION_DATA } from './regions-data.js';
-import { partyOf } from './party.js';
+import { partyOf, byName, partyKey, nearHome, nm, KNOWN_PINS } from './party.js';
 
 const ALLOWED_ORIGINS = ['https://louiebo1.github.io', 'http://127.0.0.1:8765', 'http://localhost:8765'];
 const ERDDAP = 'https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41';
 const ALERT_AFTER = 20;
 /** Bumped on every change, so /hello shows which code is answering. */
-const VERSION = 7;
+const VERSION = 8;
 
 export default {
   async fetch(request, env) {
@@ -45,6 +46,10 @@ async function route(request, env) {
   const url = new URL(request.url);
   const path = url.pathname;
   const hub = () => ({ fetch: (u, init = {}) => hubFetch(env, u, init) });
+
+  // Open to anyone, reveals nothing: wakes the Hub (relay/deploy.sh calls it, so new code
+  // takes over at once and the round-the-clock listening starts).
+  if (path === '/wake') return hub().fetch('https://hub/hello');
 
   if (path === '/unlock' && request.method === 'POST') {
     const body = await request.json().catch(() => ({}));
@@ -95,7 +100,7 @@ async function route(request, env) {
   }
 
   // The Hub's own: /boats, /history, /stats, /hello, /alert-test, /forget (this device).
-  if (['/boats', '/history', '/stats', '/hello', '/alert-test', '/forget'].includes(path)) {
+  if (['/boats', '/trails', '/history', '/stats', '/hello', '/alert-test', '/forget'].includes(path)) {
     return hub().fetch(`https://hub${path}${url.search}`, { method: request.method, headers: { 'X-Device': device } });
   }
   return json({ error: 'Not found' }, 404);
@@ -145,8 +150,13 @@ function json(value, status = 200, headers = {}) {
 const AIS_TYPES = ['PositionReport', 'StandardClassBPositionReport', 'ExtendedClassBPositionReport', 'ShipStaticData', 'StaticDataReport'];
 const BOXES = REGION_DATA.map(r => [[r.south, r.west], [r.north, r.east]]);
 const FORGET = 2 * 3600e3, FORGET_PARTY = 24 * 3600e3;
-/** Stop listening to aisstream this long after the last page asked for boats. */
-const IDLE = 3 * 60e3;
+/** Party boats' tracks are kept this long. */
+const TRAIL = 72 * 3600e3;
+/** Storage is written every this many minutes (the free plan allows 100,000 row writes a
+ *  day; a minute's worth of positions lost on a restart doesn't matter). */
+const FLUSH_MINUTES = 5;
+/** A pinned transponder silent this long can be replaced by another one with the name. */
+const REPIN = 14 * 86400e3;
 
 export class Hub {
   constructor(state, env) {
@@ -155,18 +165,39 @@ export class Hub {
     this.fleet = null;          // mmsi → boat
     this.types = null;          // mmsi → AIS ship type (sent only every few minutes)
     this.ws = null;
-    this.lastViewer = 0;
+    this.trails = null;         // mmsi → [[seconds, lat, lon, knots], …] (party boats)
+    this.pins = null;           // name key → { mmsi, seen }
+    this.dirty = new Set();     // trails changed since the last flush
+    this.pinsDirty = false;
+    this.minutes = 0;
     this.heard = false;
     this.refused = 0;
     this.status = 'off';
     this.retryAt = 0;
   }
 
-  async load() {
-    if (this.fleet) return;
+  load() {
+    return this.loading || (this.loading = this.loadOnce());
+  }
+
+  async loadOnce() {
     const saved = await this.state.storage.get('fleet');
     this.fleet = new Map((saved && saved.boats || []).map(b => [b.mmsi, b]));
     this.types = new Map(saved && saved.types || []);
+    this.pins = (await this.state.storage.get('pins')) || {};
+    // Transponders known for sure (fishing-reports.ai's fleet list) always win.
+    for (const [k, mmsi] of Object.entries(KNOWN_PINS)) {
+      if (!this.pins[k] || this.pins[k].mmsi !== mmsi) this.pins[k] = { mmsi, seen: 0, known: true };
+      this.pins[k].known = true;
+    }
+    this.trails = new Map();
+    for (const [key, points] of await this.state.storage.list({ prefix: 'trail:' })) this.trails.set(Number(key.slice(6)), points);
+  }
+
+  /** {nameKey: mmsi}, what the pages and the app match with. */
+  pinMap() {
+    if (!this.pinCache) this.pinCache = Object.fromEntries(Object.entries(this.pins).map(([k, p]) => [k, p.mmsi]));
+    return this.pinCache;
   }
 
   async save() {
@@ -174,10 +205,27 @@ export class Hub {
     this.prune();
     const types = [...this.types].slice(-4000);
     await this.state.storage.put('fleet', { boats: [...this.fleet.values()], types });
+    const oldest = (Date.now() - TRAIL) / 1000;
+    for (const mmsi of this.dirty) {
+      const points = this.trails.get(mmsi);
+      if (!points) continue;
+      while (points.length && points[0][0] < oldest) points.shift();
+      if (points.length) await this.state.storage.put(`trail:${mmsi}`, points);
+      else { this.trails.delete(mmsi); await this.state.storage.delete(`trail:${mmsi}`); }
+    }
+    this.dirty.clear();
+    // Trails of boats that went quiet age out too (a quiet boat is never dirty).
+    for (const [mmsi, points] of this.trails) {
+      if (points.length && points[points.length - 1][0] < oldest) { this.trails.delete(mmsi); await this.state.storage.delete(`trail:${mmsi}`); }
+    }
+    // Pins every time: their `seen` (for re-pinning after two silent weeks) moves constantly.
+    await this.state.storage.put('pins', this.pins);
+    this.pinsDirty = false;
   }
 
   prune(now = Date.now()) {
-    for (const [k, b] of this.fleet) if (now - b.seen > (partyOf(b).length ? FORGET_PARTY : FORGET)) this.fleet.delete(k);
+    const pins = this.pinMap();
+    for (const [k, b] of this.fleet) if (now - b.seen > (partyOf(b, pins).length ? FORGET_PARTY : FORGET)) this.fleet.delete(k);
   }
 
   async fetch(request) {
@@ -190,8 +238,10 @@ export class Hub {
     const url = new URL(request.url);
     const device = request.headers.get('X-Device');
     if (device && url.pathname !== '/forget') await this.touch(device);
+    await this.listen();
     switch (url.pathname) {
       case '/boats': return this.boats();
+      case '/trails': return this.trailsSince(Number(url.searchParams.get('since')) || 0);
       case '/history': return this.history(Number(url.searchParams.get('days')) === 14 ? 14 : 7);
       case '/attempt': return this.attempt(await request.json());
       case '/register': return this.register(await request.json());
@@ -205,14 +255,33 @@ export class Hub {
 
   // --- Boats -----------------------------------------------------------------------------
 
-  async boats() {
+  /** Listening never stops: any call (and the alarm every minute) reconnects if needed. */
+  async listen() {
     await this.load();
-    this.lastViewer = Date.now();
     if (!this.env.AIS_KEY) this.status = 'nokey';
     else if (!this.ws && Date.now() >= this.retryAt) await this.connect();
     await this.ensureAlarm();
+  }
+
+  async boats() {
     this.prune();
-    return json({ status: this.status, at: Date.now(), boats: [...this.fleet.values()] });
+    return json({ status: this.status, at: Date.now(), pins: this.pinMap(), boats: [...this.fleet.values()] });
+  }
+
+  /** The party boats' track points heard after `since` (ms; 0 = all 72 hours). */
+  trailsSince(since) {
+    const after = since / 1000;
+    const trails = {};
+    const pins = this.pinMap(), pinned = new Set(Object.values(pins));
+    for (const [mmsi, points] of this.trails) {
+      // Only boats that are party boats now (a namesake heard before the real one was
+      // pinned keeps its trail until it ages out, but isn't shown).
+      const boat = this.fleet.get(mmsi);
+      if (!pinned.has(mmsi) && !(boat && partyOf(boat, pins).length)) continue;
+      const fresh = after ? points.filter(p => p[0] > after) : points;
+      if (fresh.length) trails[mmsi] = fresh;
+    }
+    return json({ at: Date.now(), pins: this.pinMap(), trails });
   }
 
   async connect() {
@@ -252,25 +321,51 @@ export class Hub {
     this.heard = true;
     this.refused = 0;
     this.status = 'live';
-    applyAIS(msg, this.fleet, this.types);
+    const mmsi = applyAIS(msg, this.fleet, this.types);
+    if (mmsi) this.track(this.fleet.get(mmsi));
+  }
+
+  /** A party boat's new position: pin it if it's the first of its name heard near its home
+   *  harbor, and add it to its trail (a point a minute at most; one every 10 minutes while
+   *  it sits still). */
+  track(b) {
+    if (!b) return;
+    const named = byName(b);
+    if (named.length) {
+      const k = partyKey(named[0].name);
+      const pin = this.pins[k];
+      if (pin && pin.mmsi === b.mmsi) pin.seen = Date.now();
+      else if ((!pin || (!pin.known && Date.now() - pin.seen > REPIN)) && nearHome(b, named)) {
+        this.pins[k] = { mmsi: b.mmsi, seen: Date.now(), since: Date.now() };
+        this.pinsDirty = true;
+        this.pinCache = null;
+      }
+    }
+    if (!partyOf(b, this.pinMap()).length) return;
+    const t = Math.round(b.seen / 1000);
+    let points = this.trails.get(b.mmsi);
+    if (!points) this.trails.set(b.mmsi, points = []);
+    const last = points[points.length - 1];
+    if (last) {
+      const dt = t - last[0];
+      if (dt < 60) return;
+      if (dt < 600 && nm(last[1], last[2], b.lat, b.lon) < 0.05) return;
+    }
+    const r5 = x => Math.round(x * 1e5) / 1e5;
+    points.push([t, r5(b.lat), r5(b.lon), b.sog == null ? null : Math.round(b.sog * 10) / 10]);
+    this.dirty.add(b.mmsi);
   }
 
   async ensureAlarm() {
     if ((await this.state.storage.getAlarm()) == null) await this.state.storage.setAlarm(Date.now() + 60e3);
   }
 
-  /** Every minute while someone is looking: keep the fleet, reconnect if dropped; else stop. */
+  /** Every minute, around the clock: reconnect if dropped; write storage every few minutes. */
   async alarm() {
     await this.load();
-    if (Date.now() - this.lastViewer > IDLE) {
-      if (this.ws) { const ws = this.ws; this.ws = null; try { ws.close(1000, 'idle'); } catch {} }
-      this.status = 'off';
-      await this.save();
-      return;
-    }
-    if (!this.ws && this.env.AIS_KEY && Date.now() >= this.retryAt) await this.connect();
-    await this.save();
     await this.state.storage.setAlarm(Date.now() + 60e3);
+    if (!this.ws && this.env.AIS_KEY && Date.now() >= this.retryAt) await this.connect();
+    if (++this.minutes % FLUSH_MINUTES === 0) await this.save();
   }
 
   // --- Fishing history (Global Fishing Watch) --------------------------------------------
@@ -356,7 +451,7 @@ export class Hub {
 }
 
 /** Folds one aisstream message into the fleet (by MMSI) and the remembered types — the
- *  same reading as the app's AISMessage.apply. */
+ *  same reading as the app's AISMessage.apply. Returns the MMSI when it was a position. */
 export function applyAIS(msg, fleet, types, now = Date.now()) {
   const kind = msg.MessageType;
   const m = msg.Message && msg.Message[kind];
@@ -380,7 +475,7 @@ export function applyAIS(msg, fleet, types, now = Date.now()) {
       if (name) b.name = name;
       if (types.has(mmsi)) b.type = types.get(mmsi);
       fleet.set(mmsi, b);
-      break;
+      return mmsi;
     }
     case 'ShipStaticData': {
       if (m.Type > 0) types.set(mmsi, m.Type);

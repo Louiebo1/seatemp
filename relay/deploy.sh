@@ -53,4 +53,6 @@ curl -s -X PUT "${auth[@]}" "$API/accounts/$ACCOUNT/workers/scripts/$SCRIPT" \
   -F "regions-data.js=@js/regions-data.js;type=application/javascript+module" | ok
 curl -s -X POST "${auth[@]}" -H "Content-Type: application/json" --data '{"enabled":true,"previews_enabled":false}' \
   "$API/accounts/$ACCOUNT/workers/scripts/$SCRIPT/subdomain" | ok
+# Wake the Hub: new code takes over at once and listening (round the clock) starts.
+curl -s "https://$SCRIPT.louiebo.workers.dev/wake"; echo
 echo "https://$SCRIPT.louiebo.workers.dev"

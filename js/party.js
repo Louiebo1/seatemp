@@ -112,6 +112,7 @@ export const PARTY_BOATS = [
   ["Cortez", "Seaforth Sportfishing", "San Diego"],
   ["El Gato Dos", "Seaforth Sportfishing", "San Diego"],
   ["Highliner", "Seaforth Sportfishing", "San Diego"],
+  ["Legacy", "Seaforth Sportfishing", "San Diego"],
   ["New Seaforth", "Seaforth Sportfishing", "San Diego"],
   ["Pacific Voyager", "Seaforth Sportfishing", "San Diego"],
   ["Pacifica", "Seaforth Sportfishing", "San Diego"],
@@ -145,15 +146,80 @@ for (const b of PARTY_BOATS) {
   byKey.get(k).push(b);
 }
 
+/** Transponders (MMSI) known for sure, by name key, checked 2026-11-19: the fleet tracker
+ *  at fishing-reports.ai/fleet lists most; Excel (338102000, IMO 8654560: MagicPort,
+ *  Maritime Optima), Searcher (call sign WBA7451: MarineTraffic, vesseltracker) and
+ *  American Angler (367485000, seen at the Point Loma landings: aisvesseltracker) from vessel
+ *  databases. The relay starts its pins with these and never re-pins them. */
+export const KNOWN_PINS = {
+  EXCEL: 338102000, SEARCHER: 367130150, AMERICANANGLER: 367485000,
+  CONSTITUTION: 368352260, DOLPHIN: 367330940, GRANDE: 366746210, HORIZON: 338776000,
+  INTREPID: 367704000, LEGACY: 366889830, LEGEND: 367600830, OLDGLORY: 367629440,
+  RANGER85: 367044250, REDROOSTER3: 366749490, ROYALSTAR: 366447000, TOPGUN80: 368437000,
+  VAGABOND: 368347000,
+};
+
 /** The party boats a boat on AIS is, by name — unless it's plainly a different boat with
  *  the same name: a freighter, tanker, tug, sailboat or pleasure craft by its type, a US
- *  recreational boat by its MMSI (338…; party boats are licensed commercial, 366–369), or
- *  north of the SoCal map (a Morro Bay or Monterey namesake). Same rule as the app. */
-export function partyOf(boat) {
+ *  recreational boat by its MMSI (338…, unless it says fishing or passenger), or
+ *  north of the SoCal map (a Morro Bay or Monterey namesake). Same rule as the app.
+ *
+ *  With `pins` (the relay's {nameKey: mmsi}: each party boat's transponder, learned the
+ *  first time a boat with its name was heard near its home harbor), a pinned transponder
+ *  is that boat whatever name it sends, and any other boat with the name isn't. */
+export function partyOf(boat, pins = null) {
+  if (pins) {
+    const pinned = pinIndex(pins).get(Number(boat.mmsi));
+    if (pinned) return byKey.get(pinned) || [];
+  }
+  const found = byName(boat);
+  if (pins && found.length) {
+    const mine = pins[partyKey(found[0].name)];
+    if (mine && Number(mine) !== Number(boat.mmsi)) return [];
+  }
+  return found;
+}
+
+/** The name rule alone (no pins). */
+export function byName(boat) {
   if (!boat.name) return [];
   const t = boat.type;
   if (t != null && ((t >= 70 && t <= 89) || [31, 32, 36, 37, 52].includes(t))) return [];
-  if (String(boat.mmsi).startsWith('338')) return [];
+  // 338… is a US recreational number — but some long-range boats have one (Excel, Horizon),
+  // so it only rules a boat out when it doesn't call itself fishing or passenger.
+  if (String(boat.mmsi).startsWith('338') && !(t === 30 || (t >= 60 && t <= 69))) return [];
   if (boat.lat > 34.6 + 0.3) return [];
   return byKey.get(partyKey(boat.name)) || [];
+}
+
+const indexes = new WeakMap();
+function pinIndex(pins) {
+  let index = indexes.get(pins);
+  if (!index) {
+    index = new Map(Object.entries(pins).map(([k, mmsi]) => [Number(mmsi), k]));
+    indexes.set(pins, index);
+  }
+  return index;
+}
+
+/** Each landing city's harbor (San Diego has two: the Point Loma landings and Mission Bay),
+ *  and how near (nm) counts as "at home" for pinning a transponder. */
+export const HOMES = {
+  'Dana Point': [[33.459, -117.698]], 'Long Beach': [[33.758, -118.204]], 'Marina Del Rey': [[33.968, -118.455]],
+  'Newport Beach': [[33.600, -117.880]], 'Oceanside': [[33.205, -117.395]], 'Oxnard': [[34.160, -119.225]],
+  'Redondo Beach': [[33.845, -118.398]], 'San Diego': [[32.722, -117.226], [32.763, -117.236]], 'San Pedro': [[33.715, -118.270]],
+  'Santa Barbara': [[34.403, -119.690]], 'Ventura': [[34.243, -119.267]],
+};
+const HOME_NM = 3;
+
+/** Nautical miles between two points (flat-earth: fine at these distances). */
+export function nm(lat1, lon1, lat2, lon2) {
+  const dy = (lat2 - lat1) * 60, dx = (lon2 - lon1) * 60 * Math.cos((lat1 + lat2) / 2 * Math.PI / 180);
+  return Math.hypot(dx, dy);
+}
+
+/** True when the boat is within a few miles (or `radius` nm) of one of these party boats'
+ *  home harbors. */
+export function nearHome(boat, parties, radius = null) {
+  return parties.some(p => (HOMES[p.city] || []).some(h => nm(boat.lat, boat.lon, h[0], h[1]) <= (radius ?? HOME_NM)));
 }

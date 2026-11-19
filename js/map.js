@@ -3,6 +3,7 @@
 // Pinch or scroll to zoom, drag to move, double-tap to fit, tap the water for its
 // temperature or a boat for who it is. Same look as the app's MapView.
 import { partyOf } from './party.js';
+import { stretchKnots, kindOf, atDock, GAP, MAX_GAP } from './trails.js';
 
 const STALE = 15 * 60e3;      // Boats not heard from in this long are drawn faded.
 const PINK = 'rgb(242, 51, 191)';
@@ -15,6 +16,8 @@ export class MapView {
     this.map = null;          // from renderMap()
     this.region = null;
     this.boats = [];
+    this.pins = null;         // the relay's transponder pins
+    this.trails = [];         // [{ mmsi, points, parties }] to draw
     this.events = [];
     this.location = null;     // { lat, lon }
     this.picked = null;       // { kind: 'water'|'boat'|'event', lat, lon, id }
@@ -109,6 +112,7 @@ export class MapView {
 
     const on = (lat, lon) => this.region.covers(lat, lon);
     for (const p of this.region.places) this.place(this.toScreen(L, p.lat, p.lon), p);
+    this.drawTrails(L);
     for (const e of this.events) if (on(e.lat, e.lon)) this.spot(this.toScreen(L, e.lat, e.lon), this.picked && this.picked.kind === 'event' && this.picked.id === e.id);
     for (const b of this.boats) if (on(b.lat, b.lon)) this.boat(this.toScreen(L, b.lat, b.lon), b, this.picked && this.picked.kind === 'boat' && this.picked.id === b.mmsi);
     if (this.location && on(this.location.lat, this.location.lon)) {
@@ -152,6 +156,47 @@ export class MapView {
     ctx.restore();
   }
 
+  /** The party boats' tracks, each stretch by its speed: thick pink where the boat was
+   *  fishing (4 kn or slower, away from its dock), yellow trolling or moving between spots
+   *  (to 10 kn), thin white running; dotted across a silence (out of a receiver's range).
+   *  The picked boat's is drawn heavier; while one is picked the others fade. */
+  drawTrails(L) {
+    if (!this.trails.length) return;
+    const { ctx } = this;
+    const pickedId = this.picked && this.picked.kind === 'boat' ? this.picked.id : null;
+    const STYLE = { fishing: [PINK, 4], trolling: ['#ffd60a', 2.4], running: ['#ffffff', 1.4], gap: ['rgba(255,255,255,0.7)', 1.2] };
+    const ordered = [...this.trails].sort((a, b) => (a.mmsi === pickedId) - (b.mmsi === pickedId));
+    ctx.save();
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (const t of ordered) {
+      const mine = t.mmsi === pickedId, scale = mine ? 1.4 : 1;
+      const paths = { fishing: new Path2D(), trolling: new Path2D(), running: new Path2D(), gap: new Path2D() };
+      let prev = null, prevPt = null;
+      for (const p of t.points) {
+        const pt = this.toScreen(L, p[1], p[2]);
+        if (prev) {
+          const dt = p[0] - prev[0], kn = stretchKnots(prev, p);
+          let kind = null;
+          if (dt > MAX_GAP) kind = null;
+          else if (dt > GAP) kind = 'gap';
+          else if (!(atDock(prev, t.parties, kn) && atDock(p, t.parties, kn))) kind = kindOf(kn);
+          if (kind) { paths[kind].moveTo(prevPt.x, prevPt.y); paths[kind].lineTo(pt.x, pt.y); }
+        }
+        prev = p; prevPt = pt;
+      }
+      ctx.globalAlpha = pickedId != null && !mine ? 0.35 : 0.95;
+      for (const kind of ['running', 'trolling', 'fishing']) {
+        ctx.setLineDash([]);
+        ctx.lineWidth = STYLE[kind][1] * scale + 2; ctx.strokeStyle = 'rgba(0,0,0,0.55)'; ctx.stroke(paths[kind]);
+      }
+      for (const kind of ['gap', 'running', 'trolling', 'fishing']) {
+        ctx.setLineDash(kind === 'gap' ? [2, 4] : []);
+        ctx.lineWidth = STYLE[kind][1] * scale; ctx.strokeStyle = STYLE[kind][0]; ctx.stroke(paths[kind]);
+      }
+    }
+    ctx.restore();
+  }
+
   /** Where a vessel fished lately (Global Fishing Watch): a small pink diamond. */
   spot({ x, y }, picked) {
     const { ctx } = this;
@@ -171,7 +216,7 @@ export class MapView {
    *  faded when it hasn't been heard from lately. */
   boat({ x, y }, b, picked) {
     const { ctx } = this;
-    const party = partyOf(b);
+    const party = partyOf(b, this.pins);
     const color = party.length ? '#ffd60a' : b.type === 30 ? '#ff9f0a' : '#fff';
     const s = picked ? 1.3 : 1;
     ctx.save();
