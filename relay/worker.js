@@ -18,7 +18,7 @@ const ALLOWED_ORIGINS = ['https://louiebo1.github.io', 'http://127.0.0.1:8765', 
 const ERDDAP = 'https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41';
 const ALERT_AFTER = 20;
 /** Bumped on every change, so /hello shows which code is answering. */
-const VERSION = 9;
+const VERSION = 10;
 
 export default {
   async fetch(request, env) {
@@ -170,6 +170,8 @@ export class Hub {
     this.dirty = new Set();     // trails changed since the last flush
     this.pinsDirty = false;
     this.minutes = 0;
+    this.started = Date.now();  // health counters, shown by /stats
+    this.messages = 0; this.points = 0; this.flushes = 0;
     this.heard = false;
     this.refused = 0;
     this.status = 'off';
@@ -213,6 +215,7 @@ export class Hub {
       else { this.trails.delete(mmsi); await this.state.storage.delete(`trail:${mmsi}`); }
     }
     this.dirty.clear();
+    this.flushes++;
     // Trails of boats that went quiet age out too (a quiet boat is never dirty).
     for (const [mmsi, points] of this.trails) {
       if (points.length && points[points.length - 1][0] < oldest) { this.trails.delete(mmsi); await this.state.storage.delete(`trail:${mmsi}`); }
@@ -320,6 +323,7 @@ export class Hub {
     this.heard = true;
     this.refused = 0;
     this.status = 'live';
+    this.messages++;
     const mmsi = applyAIS(msg, this.fleet, this.types);
     if (mmsi) this.track(this.fleet.get(mmsi));
   }
@@ -352,6 +356,7 @@ export class Hub {
     }
     const r5 = x => Math.round(x * 1e5) / 1e5;
     points.push([t, r5(b.lat), r5(b.lon), b.sog == null ? null : Math.round(b.sog * 10) / 10]);
+    this.points++;
     this.dirty.add(b.mmsi);
   }
 
@@ -427,7 +432,10 @@ export class Hub {
       .map(d => ({ first: d.first, last: d.last, label: d.label })).sort((a, b) => a.first - b.first);
     return json({ count: devices.length, alertAfter: ALERT_AFTER, alerted: await this.state.storage.get('alerted') || null,
                   emailReady: !!this.env.RESEND_KEY,
-                  keys: { ais: (this.env.AIS_KEY || '').length, gfw: (this.env.GFW_TOKEN || '').length }, devices });
+                  keys: { ais: (this.env.AIS_KEY || '').length, gfw: (this.env.GFW_TOKEN || '').length },
+                  hub: { version: VERSION, upMinutes: Math.round((Date.now() - this.started) / 60e3), alarms: this.minutes,
+                         status: this.status, messages: this.messages, points: this.points, flushes: this.flushes,
+                         trails: this.trails ? this.trails.size : null, dirty: this.dirty.size }, devices });
   }
 
   async sendAlert(count, test = false) {
