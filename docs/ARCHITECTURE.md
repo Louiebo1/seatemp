@@ -6,7 +6,7 @@ First written 2026-10-23; updated 2026-11-19 for the round-the-clock boat record
 transponder pins, the app reading boats through the relay, and the saved temperature maps. Louie makes the diagram in
 ChatGPT from the description and prompt below. If the design changes, update the
 description and prompt and ask Louie to remake the image — never generate it through an API.
-(The picture above is still the October one until he remakes it.)
+(Picture remade 2026-11-19 and checked against the design.)
 
 ## Three layers, left to right
 
