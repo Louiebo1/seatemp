@@ -3,7 +3,7 @@
 ![Sea Temp architecture](architecture.png)
 
 First written 2026-10-23; updated 2026-11-19 for the round-the-clock boat recorder, trails,
-transponder pins and the app reading boats through the relay. Louie makes the diagram in
+transponder pins, the app reading boats through the relay, and the saved temperature maps. Louie makes the diagram in
 ChatGPT from the description and prompt below. If the design changes, update the
 description and prompt and ask Louie to remake the image — never generate it through an API.
 (The picture above is still the October one until he remakes it.)
@@ -26,7 +26,13 @@ description and prompt and ask Louie to remake the image — never generate it t
 - **Relay (Cloudflare Worker, `seatemp.louiebo.workers.dev`)**
   - Checks the passcode and gives each device a sign-in token.
   - Holds the hidden secrets: passcode, aisstream key, Global Fishing Watch token, Resend key.
-  - Fetches temperature maps from NOAA for the four maps (Monterey, Morro Bay, SoCal, Baja).
+  - Serves the temperature maps for the four maps (Monterey, Morro Bay, SoCal, Baja) from
+    **Saved maps**, so pages never wait on NOAA's slow server (SoCal went from 2.6 s to 0.6 s).
+- **Saved maps (Cloudflare KV storage, `seatemp-maps`)**
+  - Each day's temperature map for all four maps, kept 16 days, and the land outlines.
+  - The hub checks NOAA every 30 minutes; when a new day is out it saves all four maps
+    first, then tells pages it's the newest. An older day someone asks for is fetched from
+    NOAA once and saved too.
 - **Hub (a Cloudflare Durable Object inside the relay)**, which runs **around the clock**:
   - **Boat listener:** a live connection to aisstream that never stops (it reconnects every
     minute if it drops), so it hears boats even when nobody is looking.
@@ -34,13 +40,14 @@ description and prompt and ask Louie to remake the image — never generate it t
   - **Transponder pins:** which radio transponder (MMSI) belongs to which of the 144 party
     boats. 100 are known for sure; the hub learns the rest the first time it hears a boat
     with the name near its home harbor.
+  - **Map keeper:** every 30 minutes, looks for a new NOAA day and fills Saved maps.
   - **Fishing history cache:** Global Fishing Watch results, refreshed every 6 hours.
   - **Device counter:** each device that unlocks; one email alert past 20.
 
 ### 3. Outside services
 | Service | What it provides | Connection |
 |---|---|---|
-| NOAA CoastWatch (NASA JPL MUR) | Daily sea surface temperature maps, about 1 km | Relay → NOAA; app → NOAA |
+| NOAA CoastWatch (NASA JPL MUR) | Daily sea surface temperature maps, about 1 km | Hub → NOAA every 30 min, into Saved maps; app → NOAA |
 | aisstream.io | Live boat positions from shore receivers (AIS) | Hub ↔ aisstream, 24/7 |
 | Global Fishing Watch | Where vessels fished in the last 7–14 days | Hub → GFW; app → GFW |
 | Resend | The alert email | Hub → Resend → Louie |
@@ -57,7 +64,7 @@ description and prompt and ask Louie to remake the image — never generate it t
 2. Web page → Relay: "passcode once, then sign-in token"
 3. App → Relay: "boats + 72-hour trails"
 4. App → NOAA and → Global Fishing Watch: "maps", "fishing spots" (thin lines)
-5. Relay → NOAA: "temperature maps"
+5. Hub → NOAA: "new day's maps, every 30 min"; Hub → Saved maps: "saves them"; Relay → Saved maps: "serves maps fast"
 6. Relay → Hub: "boats, trails, fishing history, device count"
 7. Hub ↔ aisstream: "live boat feed, around the clock"
 8. Hub → Global Fishing Watch: "fishing spots, every 6 h"
@@ -69,8 +76,9 @@ description and prompt and ask Louie to remake the image — never generate it t
 - **Left column:** family devices on top; the Sea Temp app (an iPhone with the app icon)
   below them.
 - **Middle:** the web page box on top; a large Cloudflare box below it with the relay
-  inside, and the hub inside the relay drawn as a cylinder split into five labeled parts.
-  A small clock badge on the hub: "24/7".
+  inside, and the hub inside the relay drawn as a cylinder split into six labeled parts.
+  A small clock badge on the hub: "24/7". Beside the hub, inside Cloudflare, a stack of
+  map tiles labeled "Saved maps (KV)".
 - **Right column:** the four live services stacked (satellite, radio tower, globe with a
   fish, envelope).
 - **Bottom strip, grey and dotted:** the three "used once" sources (a fish-count clipboard,
@@ -82,11 +90,11 @@ description and prompt and ask Louie to remake the image — never generate it t
 >
 > Left column: at the top, icons of an iPhone, an iPad and a laptop labeled "Family devices". Below them, separated by a little space, an iPhone showing a sea-temperature app labeled "Sea Temp app (iPhone, iPad, Mac)".
 >
-> Middle: a box labeled "Web page — GitHub Pages (louiebo1.github.io/seatemp)" with a small ocean temperature map thumbnail (purple-blue-green-yellow-red) that has a few short pink and yellow boat trail lines on it. Below it, a large orange-outlined box labeled "Cloudflare (free plan)" containing a box "Relay — checks passcode, holds secret keys, fetches maps", and inside that a teal cylinder labeled "Hub" with a small clock badge reading "24/7", divided into five labeled bands: "Boat listener", "72-hour trail recorder", "Transponder pins (144 party boats)", "Fishing history cache", "Device counter". A dashed border around the Cloudflare box labeled "Secrets stay here — never sent to phones".
+> Middle: a box labeled "Web page — GitHub Pages (louiebo1.github.io/seatemp)" with a small ocean temperature map thumbnail (purple-blue-green-yellow-red) that has a few short pink and yellow boat trail lines on it. Below it, a large orange-outlined box labeled "Cloudflare (free plan)" containing a box "Relay — checks passcode, holds secret keys, fetches maps", and inside that a teal cylinder labeled "Hub" with a small clock badge reading "24/7", divided into six labeled bands: "Boat listener", "72-hour trail recorder", "Transponder pins (144 party boats)", "Map keeper (checks NOAA every 30 min)", "Fishing history cache", "Device counter". Beside the hub, still inside the Cloudflare box, a small stack of colorful map tiles labeled "Saved maps (KV) — 16 days, all four maps". A dashed border around the Cloudflare box labeled "Secrets stay here — never sent to phones".
 >
 > Right column, stacked: "NOAA CoastWatch — daily sea temperature maps" (satellite icon), "aisstream.io — live boat positions" (radio tower icon), "Global Fishing Watch — recent fishing spots" (globe with fish icon), "Resend — alert email" (envelope icon) with a small inbox labeled "Louie" beside it.
 >
-> Arrows: Family devices → web page ("opens site"); web page → relay ("passcode once, then token"); Sea Temp app → relay ("boats + 72-hour trails"); thin arrows from the Sea Temp app → NOAA ("maps") and → Global Fishing Watch ("fishing spots"); relay → NOAA ("temperature maps"); hub ↔ aisstream ("live boat feed, around the clock"); hub → Global Fishing Watch ("fishing spots, every 6 hours"); hub → Resend → Louie ("alert after 20 devices").
+> Arrows: Family devices → web page ("opens site"); web page → relay ("passcode once, then token"); Sea Temp app → relay ("boats + 72-hour trails"); thin arrows from the Sea Temp app → NOAA ("maps") and → Global Fishing Watch ("fishing spots"); hub → NOAA ("new day's maps, every 30 min"); hub → Saved maps ("saves them"); Saved maps → relay ("maps served fast"); hub ↔ aisstream ("live boat feed, around the clock"); hub → Global Fishing Watch ("fishing spots, every 6 hours"); hub → Resend → Louie ("alert after 20 devices").
 >
 > Along the bottom, in a light grey strip labeled "Used once to build the boat list", three small grey icons: a clipboard "Fish-count sites — 144 party boats", an ID card "FCC ship licenses — transponder numbers", a map pin "Fleet trackers — cross-check". Dotted grey arrows go from this strip up to the "Transponder pins" band of the hub.
 >

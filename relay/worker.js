@@ -4,8 +4,9 @@
 // - A device unlocks once with the passcode and gets a token (an HMAC of its device id
 //   under the passcode); every other call needs it. Change the passcode and every device
 //   is asked again.
-// - Passes NOAA's temperature maps through (NOAA sends no CORS headers, so a page can't
-//   read them itself), only for the four maps.
+// - Serves NOAA's temperature maps (NOAA sends no CORS headers, so a page can't read them
+//   itself), only for the four maps, from Cloudflare KV (MAPS): the Hub fetches each new
+//   day for all four maps as soon as NOAA has it, so pages never wait on NOAA's slow server.
 // - The Hub (one Durable Object) listens to aisstream around the clock, keeps the fleet
 //   and the party boats' last 72 hours of track, pins each party boat to its transponder,
 //   caches Global Fishing Watch's fishing events for 6 hours, and counts devices:
@@ -18,7 +19,7 @@ const ALLOWED_ORIGINS = ['https://louiebo1.github.io', 'http://127.0.0.1:8765', 
 const ERDDAP = 'https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41';
 const ALERT_AFTER = 20;
 /** Bumped on every change, so /hello shows which code is answering. */
-const VERSION = 10;
+const VERSION = 11;
 
 export default {
   async fetch(request, env) {
@@ -72,31 +73,23 @@ async function route(request, env) {
   if (!device || !token || !env.PASSCODE || token !== await tokenFor(device, env)) return json({ error: 'locked' }, 401);
 
   if (path === '/sst/latest') {
-    const r = await fetch(`${ERDDAP}.json?time%5B(last)%5D`);
-    if (!r.ok) return json({ error: `NOAA answered ${r.status}` }, 502);
-    const day = (await r.json()).table.rows[0][0].slice(0, 10);
-    return json({ day }, 200, { 'Cache-Control': 'private, max-age=1800' });
+    // The newest day whose four maps are already saved (the Hub checks NOAA every 30 min).
+    const saved = env.MAPS && await env.MAPS.get('latest', 'json');
+    if (saved && Date.now() - saved.at < 3 * 3600e3) return json({ day: saved.day }, 200, { 'Cache-Control': 'private, max-age=900' });
+    const day = await noaaLatest();
+    if (!day) return json({ error: 'NOAA isn\'t answering' }, 502);
+    return json({ day }, 200, { 'Cache-Control': 'private, max-age=900' });
   }
   if (path === '/sst/grid' || path === '/sst/mask') {
     const region = REGION_DATA.find(r => r.id === url.searchParams.get('region'));
     if (!region) return json({ error: 'No such map' }, 404);
-    const box = `%5B(${region.south}):1:(${region.north})%5D%5B(${region.west}):1:(${region.east})%5D`;
-    let query, maxAge;
-    if (path === '/sst/mask') {
-      query = `mask%5B(last)%5D${box}`;
-      maxAge = 30 * 86400;     // Land doesn't move.
-    } else {
-      const day = url.searchParams.get('day') || '';
-      if (!/^\d{4}-\d\d-\d\d$/.test(day)) return json({ error: 'Bad day' }, 400);
-      query = `analysed_sst%5B(${day}T09:00:00Z)%5D${box}`;
-      maxAge = 14 * 86400;     // A day's map never changes.
-    }
-    // NOAA's server sometimes times out once (Cloudflare's 522); a second try works.
-    let r = await fetch(`${ERDDAP}.esriAscii?${query}`);
-    if (r.status >= 500) r = await fetch(`${ERDDAP}.esriAscii?${query}`);
-    if (r.status === 404 || (!r.ok && (await r.clone().text()).includes('outside'))) return json({ error: 'not available' }, 404);
-    if (!r.ok) return json({ error: `NOAA answered ${r.status}` }, 502);
-    return new Response(r.body, { headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': `private, max-age=${maxAge}` } });
+    const day = path === '/sst/mask' ? null : url.searchParams.get('day') || '';
+    if (day !== null && !/^\d{4}-\d\d-\d\d$/.test(day)) return json({ error: 'Bad day' }, 400);
+    const got = await savedMap(env, region, day);
+    if (got.error) return json({ error: got.error }, got.status);
+    // Land doesn't move; a day's map never changes.
+    const maxAge = day === null ? 30 * 86400 : 14 * 86400;
+    return new Response(got.body, { headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': `private, max-age=${maxAge}`, 'X-From': got.from } });
   }
 
   // The Hub's own: /boats, /history, /stats, /hello, /alert-test, /forget (this device).
@@ -139,6 +132,61 @@ async function tokenFor(device, env) {
     { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(device)));
   return btoa(String.fromCharCode(...mac)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+// --- Temperature maps, saved in KV --------------------------------------------------------
+
+const mapKey = (region, day) => (day === null ? `mask:${region.id}` : `grid:${region.id}:${day}`);
+
+/** NOAA's newest day (YYYY-MM-DD), or null. */
+async function noaaLatest() {
+  const r = await fetch(`${ERDDAP}.json?time%5B(last)%5D`);
+  if (!r.ok) return null;
+  return (await r.json()).table.rows[0][0].slice(0, 10);
+}
+
+/** One map (day null = the land mask) straight from NOAA: { body } or { error, status }. */
+async function noaaMap(region, day) {
+  const box = `%5B(${region.south}):1:(${region.north})%5D%5B(${region.west}):1:(${region.east})%5D`;
+  const query = day === null ? `mask%5B(last)%5D${box}` : `analysed_sst%5B(${day}T09:00:00Z)%5D${box}`;
+  // NOAA's server sometimes times out once (Cloudflare's 522); a second try works.
+  let r = await fetch(`${ERDDAP}.esriAscii?${query}`);
+  if (r.status >= 500) r = await fetch(`${ERDDAP}.esriAscii?${query}`);
+  if (r.status === 404 || (!r.ok && (await r.clone().text()).includes('outside'))) return { error: 'not available', status: 404 };
+  if (!r.ok) return { error: `NOAA answered ${r.status}`, status: 502 };
+  return { body: await r.arrayBuffer() };
+}
+
+/** A map from KV, or fetched from NOAA and saved (days kept 16 days, masks 60). */
+async function savedMap(env, region, day) {
+  const key = mapKey(region, day);
+  if (env.MAPS) {
+    const hit = await env.MAPS.get(key, 'arrayBuffer');
+    if (hit) return { body: hit, from: 'saved' };
+  }
+  const got = await noaaMap(region, day);
+  if (got.body && env.MAPS) await env.MAPS.put(key, got.body, { expirationTtl: (day === null ? 60 : 16) * 86400 });
+  return { ...got, from: 'noaa' };
+}
+
+/** Called by the Hub every 30 minutes: when NOAA has a new day, save all four maps (and any
+ *  missing land mask) before telling pages it's the newest. */
+async function keepMapsUp(env) {
+  if (!env.MAPS) return;
+  const day = await noaaLatest();
+  if (!day) return;
+  const saved = await env.MAPS.get('latest', 'json');
+  if (saved && saved.day === day && Date.now() - saved.at < 2 * 3600e3) return;
+  for (const region of REGION_DATA) {
+    for (const d of [day, null]) {
+      if (await env.MAPS.get(mapKey(region, d), 'arrayBuffer') == null) {
+        const got = await noaaMap(region, d);
+        if (!got.body) return;          // Try again next time; don't announce a day we can't serve.
+        await env.MAPS.put(mapKey(region, d), got.body, { expirationTtl: (d === null ? 60 : 16) * 86400 });
+      }
+    }
+  }
+  await env.MAPS.put('latest', JSON.stringify({ day, at: Date.now() }));
 }
 
 function json(value, status = 200, headers = {}) {
@@ -370,6 +418,7 @@ export class Hub {
     await this.state.storage.setAlarm(Date.now() + 60e3);
     if (!this.ws && this.env.AIS_KEY && Date.now() >= this.retryAt) await this.connect();
     if (++this.minutes % FLUSH_MINUTES === 0) await this.save();
+    if (this.minutes % 30 === 1) { try { await keepMapsUp(this.env); } catch (e) { /* next time */ } }
   }
 
   // --- Fishing history (Global Fishing Watch) --------------------------------------------

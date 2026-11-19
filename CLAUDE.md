@@ -20,8 +20,13 @@ ES modules, no build step. Family only: a passcode, asked once per device.
     page keeps `DEVICE.TOKEN` in localStorage (`seatemp.auth`) and sends it as a Bearer
     token. Passcode compared ignoring case and spaces. 10 wrong tries an hour per IP.
     Changing the passcode signs every device out.
-  - `/sst/latest`, `/sst/grid?region&day`, `/sst/mask?region`: ERDDAP passed through for
-    the four boxes only (`regions-data.js`), retried once on NOAA's occasional 522.
+  - `/sst/latest`, `/sst/grid?region&day`, `/sst/mask?region`: the four boxes only
+    (`regions-data.js`), served from Workers KV `seatemp-maps` (binding MAPS; deploy.sh
+    makes it): `grid:<region>:<day>` (16-day TTL), `mask:<region>` (60), `latest`
+    {day, at}. The Hub's alarm runs `keepMapsUp` every 30 min: on a new NOAA day it saves
+    all four grids + any missing masks, then updates `latest` (so the newest day is always
+    saved). A miss fetches ERDDAP (retried once on its 522) and saves it. Response header
+    `X-From: saved|noaa`. Measured 2026-11-19: SoCal 2.6 s → 0.6 s, Baja 2.6 s → 0.8 s.
     Browser-cached (`private, max-age`); the Cache API does nothing on workers.dev.
   - The Hub (one Durable Object, SQLite-backed — the free plan's kind): holds the
     aisstream websocket **around the clock** (since 2026-11-19; alarm every minute

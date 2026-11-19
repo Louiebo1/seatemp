@@ -28,9 +28,15 @@ if [ "${1:-}" = secret ]; then
   exit
 fi
 
+# The saved temperature maps live in a KV namespace "seatemp-maps" (made on first deploy).
+KV=$(curl -s "${auth[@]}" "$API/accounts/$ACCOUNT/storage/kv/namespaces?per_page=100" | python3 -c 'import json,sys; print(next((n["id"] for n in json.load(sys.stdin)["result"] if n["title"]=="seatemp-maps"), ""))')
+if [ -z "$KV" ]; then
+  KV=$(curl -s -X POST "${auth[@]}" -H "Content-Type: application/json" --data '{"title":"seatemp-maps"}' "$API/accounts/$ACCOUNT/storage/kv/namespaces" | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["id"])')
+fi
+
 # First upload creates the Hub's storage (a migration); later ones must not repeat it.
 EXISTS=$(curl -s -o /dev/null -w '%{http_code}' "${auth[@]}" "$API/accounts/$ACCOUNT/workers/scripts/$SCRIPT/settings")
-METADATA=$(python3 - "$EXISTS" <<'PY'
+METADATA=$(python3 - "$EXISTS" "$KV" <<'PY'
 import json, sys
 m = {
   "main_module": "worker.js",
@@ -38,6 +44,7 @@ m = {
   "bindings": [
     {"type": "durable_object_namespace", "name": "HUB", "class_name": "Hub"},
     {"type": "plain_text", "name": "ALERT_EMAIL", "text": "louiebo@comcast.net"},
+    {"type": "kv_namespace", "name": "MAPS", "namespace_id": sys.argv[2]},
   ],
   "keep_bindings": ["secret_text"],
 }
