@@ -12,13 +12,13 @@
 //   when more than ALERT_AFTER have unlocked, it emails ALERT_EMAIL once (Resend).
 
 import { REGION_DATA } from './regions-data.js';
-import { partyOf, byName, partyKey, nearHome, nm, KNOWN_PINS } from './party.js';
+import { partyOf, byName, partyKey, nearHome, nm, KNOWN_PINS, pinList } from './party.js';
 
 const ALLOWED_ORIGINS = ['https://louiebo1.github.io', 'http://127.0.0.1:8765', 'http://localhost:8765'];
 const ERDDAP = 'https://coastwatch.pfeg.noaa.gov/erddap/griddap/jplMURSST41';
 const ALERT_AFTER = 20;
 /** Bumped on every change, so /hello shows which code is answering. */
-const VERSION = 8;
+const VERSION = 9;
 
 export default {
   async fetch(request, env) {
@@ -187,8 +187,7 @@ export class Hub {
     this.pins = (await this.state.storage.get('pins')) || {};
     // Transponders known for sure (fishing-reports.ai's fleet list) always win.
     for (const [k, mmsi] of Object.entries(KNOWN_PINS)) {
-      if (!this.pins[k] || this.pins[k].mmsi !== mmsi) this.pins[k] = { mmsi, seen: 0, known: true };
-      this.pins[k].known = true;
+      this.pins[k] = { mmsi, seen: (this.pins[k] && this.pins[k].seen) || 0, known: true };
     }
     this.trails = new Map();
     for (const [key, points] of await this.state.storage.list({ prefix: 'trail:' })) this.trails.set(Number(key.slice(6)), points);
@@ -272,7 +271,7 @@ export class Hub {
   trailsSince(since) {
     const after = since / 1000;
     const trails = {};
-    const pins = this.pinMap(), pinned = new Set(Object.values(pins));
+    const pins = this.pinMap(), pinned = new Set(Object.values(pins).flatMap(pinList));
     for (const [mmsi, points] of this.trails) {
       // Only boats that are party boats now (a namesake heard before the real one was
       // pinned keeps its trail until it ages out, but isn't shown).
@@ -334,7 +333,7 @@ export class Hub {
     if (named.length) {
       const k = partyKey(named[0].name);
       const pin = this.pins[k];
-      if (pin && pin.mmsi === b.mmsi) pin.seen = Date.now();
+      if (pin && pinList(pin.mmsi).includes(b.mmsi)) pin.seen = Date.now();
       else if ((!pin || (!pin.known && Date.now() - pin.seen > REPIN)) && nearHome(b, named)) {
         this.pins[k] = { mmsi: b.mmsi, seen: Date.now(), since: Date.now() };
         this.pinsDirty = true;

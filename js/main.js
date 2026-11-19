@@ -429,7 +429,7 @@ function renderList() {
     ${heard.map(p => heardRow(p, heardBy.get(p))).join('')}
     <h3>Not heard today · ${quiet.length}</h3>
     ${quiet.map(p => `<div class="row quiet"><b>${esc(p.name)}</b><div class="small">${esc(p.landing)} · ${esc(p.city)}</div></div>`).join('')}
-    <p class="small muted">At the dock with the AIS off, out of a shore receiver’s range, or not carrying AIS. Boat list: every boat that posted fish counts from a Southern California landing in the past year (SanDiegoFishReports.com, SoCalFishReports.com), plus San Diego’s long-range fleet. Matched to AIS by name, then pinned to the boat’s own transponder (the first one heard under that name near its home harbor, or fishing-reports.ai’s fleet list), so a same-named boat elsewhere isn’t mixed up with it.</p>`;
+    <p class="small muted">At the dock with the AIS off, out of a shore receiver’s range, or not carrying AIS. Boat list: every boat that posted fish counts in the past year from a Southern California landing (SanDiegoFishReports.com, SoCalFishReports.com), Monterey Bay or Morro Bay (NorCalFishReports.com), plus San Diego’s long-range fleet. Each is pinned to its own transponder (FCC ship licenses, fleet trackers, or the first one heard under its name near its home harbor), so a same-named boat elsewhere isn’t mixed up with it.</p>`;
 }
 
 function heardRow(p, b) {

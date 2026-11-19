@@ -32,7 +32,7 @@ ES modules, no build step. Family only: a passcode, asked once per device.
     boats that are party boats now). Pins (`pins`: name key → {mmsi, seen, known}): a party
     boat's transponder, learned the first time a boat with the name is heard within 3 nm of
     its home harbor (`HOMES` in party.js), re-pinnable after 14 silent days; `KNOWN_PINS`
-    (fishing-reports.ai's fleet list + Excel, Searcher, American Angler) always win. `/boats`
+    (100 transponders for 97 names: fishing-reports.ai's fleet list, vessel databases, and the FCC's ship licenses — data.fcc.gov ULS `l_ship.zip`, SH.dat name→MMSI joined to EN.dat licensee/city, picked when the licensee is a sportfishing company near the landing) always win; a list where boats share a name (Patriot, Endeavor). A name's pins exclude namesakes only when they cover every party boat with that name. `/boats`
     and `/trails` send `pins`; `partyOf(boat, pins)` uses them. `/wake` (no auth) starts it;
     deploy.sh calls it. `/history?days=7|14`
     caches GFW events 6 h (GFW answers 201); counts devices (`device:<id>` → first, last,
@@ -54,7 +54,7 @@ ES modules, no build step. Family only: a passcode, asked once per device.
 - `js/regions-data.js` — generated from the app's `Region.swift` by
   `tools/regions_from_app.py` (edit the app, then regenerate). `js/regions.js` — covers
   (hidden boxes), describe ("8 nm SW of …"), position.
-- `js/party.js` — the 124 party boats and `partyOf(boat, pins)` (same rule as the app:
+- `js/party.js` — the 144 party boats and `partyOf(boat, pins)` (same rule as the app:
   pinned transponder first; else by name unless cargo/tanker/tug/sailing/pleasure type, MMSI
   338… that doesn't say fishing/passenger (Excel and Horizon are 338), or north of
   34.9°N); `KNOWN_PINS`, `HOMES`; shared with the relay. Regenerate the list with

@@ -137,6 +137,26 @@ export const PARTY_BOATS = [
   ["Endeavor", "Ventura Harbor Sportfishing", "Ventura"],
   ["Island Spirit", "Ventura Harbor Sportfishing", "Ventura"],
   ["Pacific Eagle", "Ventura Harbor Sportfishing", "Ventura"],
+  ["Caroline", "Chris' Fishing Trips", "Monterey"],
+  ["Check Mate", "Chris' Fishing Trips", "Monterey"],
+  ["Star of Monterey", "Chris' Fishing Trips", "Monterey"],
+  ["Chubasco", "J&M Sportfishing", "Monterey"],
+  ["Kahuna", "J&M Sportfishing", "Monterey"],
+  ["New Horizon", "J&M Sportfishing", "Monterey"],
+  ["Barbarossa", "Barbarossa Fishing", "Santa Cruz"],
+  ["Legacy", "Stagnaro's Charters", "Santa Cruz"],
+  ["Velocity", "Stagnaro's Charters", "Santa Cruz"],
+  ["Mega-bite", "Monterey Bay Charters", "Santa Cruz"],
+  ["Salmon Streaker", "Santa Cruz Coastal Fishing Charters", "Santa Cruz"],
+  ["Avenger", "Morro Bay Landing", "Morro Bay"],
+  ["Endeavor", "Morro Bay Landing", "Morro Bay"],
+  ["Starfire", "Morro Bay Landing", "Morro Bay"],
+  ["Black Pearl", "Black Pearl Sportfishing", "Morro Bay"],
+  ["Fiesta", "Virg's Landing", "Morro Bay"],
+  ["Rita G", "Virg's Landing", "Morro Bay"],
+  ["Flying Fish", "Patriot Sportfishing", "Avila Beach"],
+  ["Patriot", "Patriot Sportfishing", "Avila Beach"],
+  ["Sunny Day", "Patriot Sportfishing", "Avila Beach"],
 ].map(([name, landing, city]) => ({ name, landing, city }));
 
 const byKey = new Map();
@@ -146,17 +166,39 @@ for (const b of PARTY_BOATS) {
   byKey.get(k).push(b);
 }
 
-/** Transponders (MMSI) known for sure, by name key, checked 2026-11-19: the fleet tracker
- *  at fishing-reports.ai/fleet lists most; Excel (338102000, IMO 8654560: MagicPort,
- *  Maritime Optima), Searcher (call sign WBA7451: MarineTraffic, vesseltracker) and
- *  American Angler (367485000, seen at the Point Loma landings: aisvesseltracker) from vessel
- *  databases. The relay starts its pins with these and never re-pins them. */
+/** Transponders (MMSI) known for sure, by name key (a list where two party boats share a
+ *  name: Patriot at Newport and San Diego, Endeavor at Ventura and Morro Bay). Checked
+ *  2026-11-19: the fleet tracker at fishing-reports.ai/fleet, vessel databases (Excel,
+ *  Searcher, American Angler), and the FCC's ship radio licenses (data.fcc.gov ULS l_ship:
+ *  each party boat's license held by its sportfishing company near its landing; 11 of them
+ *  agreed with the fleet tracker). The relay starts its pins with these and never re-pins
+ *  them; learned pins only fill in names not listed here. */
 export const KNOWN_PINS = {
-  EXCEL: 338102000, SEARCHER: 367130150, AMERICANANGLER: 367485000,
-  CONSTITUTION: 368352260, DOLPHIN: 367330940, GRANDE: 366746210, HORIZON: 338776000,
-  INTREPID: 367704000, LEGACY: 366889830, LEGEND: 367600830, OLDGLORY: 367629440,
-  RANGER85: 367044250, REDROOSTER3: 366749490, ROYALSTAR: 366447000, TOPGUN80: 368437000,
-  VAGABOND: 368347000,
+  AGGRESSOR: 366897770, ALICIA: 368160170, ALOHASPIRIT: [368464920, 368018780],
+  AMERICANANGLER: 367485000, AMIGO: 368133430, APOLLO: 303338000, AVENGER: 367767450,
+  BLACKPEARL: 367698640, CALIFORNIAN: 368189960, CAROLINE: 366752090, CHUBASCO: 367785470,
+  CHUBASCO2: 366688460, CITYOFLONGBEACH: 367034320, CLEMENTE: 367324190, COBRA: 367673660,
+  CONSTITUTION: 368352260, CORALSEA: 367671430, DAILYDOUBLE: 368081690, DAIWAPACIFIC: 367346990,
+  DANAPRIDE: 366849310, DOLPHIN: 367330940, ELDORADO: 368089620, ELPATRON: 366915000,
+  ENDEAVOR: [367452860, 367694510], ENTERPRISE: 367095040, ESTELLA: 368071460,
+  EXCALIBUR: 368050590, EXCEL: 338102000, FIESTA: 366112760, FLYINGFISH: 366060000,
+  FORTUNE: 367515120, FREEDOM: 367621160, FURY: 366917650, GAILFORCE: 367592620,
+  GENTLEMAN: 368052510, GRANDE: 366746210, HELENA: 367611730, HORIZON: 338776000,
+  INDEPENDENCE: 338795000, INTREPID: 367704000, ISLANDER: 368406170, ISLANDFOX: 368236210,
+  ISLANDSPIRIT: 368140130, ISLANDTAK: 366925740, KAHUNA: 368247080, LEGACY: 366889830,
+  LEGEND: 367600830, MALIHINI: 367146720, MISSIONBELLE: 367180720, MONTECARLO: 368014440,
+  NATIVESUN: 367655460, NEWDELMAR: 366855060, NEWHORIZON: 367785650, NEWLOAN: 338093000,
+  NEWSANMATEO: 368271550, NEWSEAFORTH: 367076870, OCEANODYSSEY: 367025330, OLDGLORY: 367629440,
+  ORION: 367529170, PACIFICA: 368218520, PACIFICQUEEN: 367186270, PATRIOT: [367099460, 368268760],
+  PESCADOR: 368051170, POINTLOMA: 367304250, POLARISSUPREME: 303676000, POSEIDON: 366880260,
+  PREMIER: 367771450, PRIDE: 368098230, PRONTO: 368155450, PURSUIT: 368022060, RANGER85: 367044250,
+  REDONDOSPECIAL: 367595720, REDROOSTER3: 366749490, REELFUN: 367393090, RITAG: 367381820,
+  ROYALSTAR: 366447000, SEARCHER: 367130150, SEAWATCH: 368376240, SHOGUN: 368453000,
+  SOUTHERNCAL: 367349390, SPEEDTWIN: 368087330, SPIRITOFADVENTURE: 367185130, SPITFIRE: 367435030,
+  SPORTKING: 368310220, STARDUST: 367163430, STAROFMONTEREY: 367141650, SUMFUN: 367304670,
+  THUNDERBIRD: 368078070, TOMAHAWK: 368046780, TOPGUN80: 368437000, TORONADO: 367169120,
+  TRIBUTE: 369713000, TRITON: 367622910, VAGABOND: 368347000, VELOCITY: 367010010,
+  VICTORY: 368412030, WESTERNPRIDE: 367158550,
 };
 
 /** The party boats a boat on AIS is, by name — unless it's plainly a different boat with
@@ -170,12 +212,15 @@ export const KNOWN_PINS = {
 export function partyOf(boat, pins = null) {
   if (pins) {
     const pinned = pinIndex(pins).get(Number(boat.mmsi));
-    if (pinned) return byKey.get(pinned) || [];
+    if (pinned) return inRange(byKey.get(pinned) || [], boat);
   }
   const found = byName(boat);
   if (pins && found.length) {
+    // Pinned under this name to other transponders — unless the pins don't cover every party
+    // boat with the name (Avila's Patriot has none yet; Newport's and San Diego's do).
     const mine = pins[partyKey(found[0].name)];
-    if (mine && Number(mine) !== Number(boat.mmsi)) return [];
+    const all = byKey.get(partyKey(found[0].name)) || [];
+    if (mine != null && !pinList(mine).includes(Number(boat.mmsi)) && pinList(mine).length >= all.length) return [];
   }
   return found;
 }
@@ -188,15 +233,22 @@ export function byName(boat) {
   // 338… is a US recreational number — but some long-range boats have one (Excel, Horizon),
   // so it only rules a boat out when it doesn't call itself fishing or passenger.
   if (String(boat.mmsi).startsWith('338') && !(t === 30 || (t >= 60 && t <= 69))) return [];
-  if (boat.lat > 34.6 + 0.3) return [];
-  return byKey.get(partyKey(boat.name)) || [];
+  return inRange(byKey.get(partyKey(boat.name)) || [], boat);
 }
+
+/** A pin's transponders (one, or a list when two party boats share the name). */
+export const pinList = v => [].concat(v).map(Number);
+
+/** Central Coast landings (the Monterey Bay and Morro Bay maps); the rest are Southern
+ *  California's, whose boats fish south to Baja. A namesake on the other coast isn't one. */
+export const CENTRAL = new Set(['Monterey', 'Santa Cruz', 'Morro Bay', 'Avila Beach']);
+const inRange = (list, boat) => list.filter(p => (CENTRAL.has(p.city) ? boat.lat >= 34.4 : boat.lat <= 34.9));
 
 const indexes = new WeakMap();
 function pinIndex(pins) {
   let index = indexes.get(pins);
   if (!index) {
-    index = new Map(Object.entries(pins).map(([k, mmsi]) => [Number(mmsi), k]));
+    index = new Map(Object.entries(pins).flatMap(([k, v]) => pinList(v).map(m => [m, k])));
     indexes.set(pins, index);
   }
   return index;
@@ -209,6 +261,8 @@ export const HOMES = {
   'Newport Beach': [[33.600, -117.880]], 'Oceanside': [[33.205, -117.395]], 'Oxnard': [[34.160, -119.225]],
   'Redondo Beach': [[33.845, -118.398]], 'San Diego': [[32.722, -117.226], [32.763, -117.236]], 'San Pedro': [[33.715, -118.270]],
   'Santa Barbara': [[34.403, -119.690]], 'Ventura': [[34.243, -119.267]],
+  'Monterey': [[36.605, -121.892]], 'Santa Cruz': [[36.962, -122.002]], 'Morro Bay': [[35.370, -120.857]],
+  'Avila Beach': [[35.170, -120.738]],
 };
 const HOME_NM = 3;
 
