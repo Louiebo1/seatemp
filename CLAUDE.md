@@ -67,12 +67,17 @@ ES modules, no build step. Family only: a passcode, asked once per device.
 - `js/trails.js` — trail speed classes (≤4 kn fishing = thick pink, ≤10 trolling = yellow,
   faster = thin white; dotted across a 30 min–6 h silence; dock points skipped), merging,
   "fished X in the last 12 h", `departure` (when it left the landing: the last at-dock point
-  and the next one; shown as one time when ≤ 20 min apart, else "between …"). Trails setting
+  and the next one; shown as one time when ≤ 20 min apart; across a longer silence, when first
+  heard away at ≥ 5 kn, "about" = distance from the dock ÷ that speed, backed up from then
+  (Eldorado 2026-11-20: dock 5:31 PM, 8.5 nm out at 11:45 PM → about 10:50 PM); else
+  "between …"). Trails setting
   `seatemp.trails` (12/24/72 h, 0 = tapped boat only).
 - Boats and trails are always live, whatever map day is shown (Louie asked 2026-11-21 why a
   boat said "36 min ago" on Thursday's map): the day bar says "Older map · boats are live"
   and a tapped boat says so too. Tapped boat: name + °F, landing · city, "Left the landing
-  6:39 AM · 12.9 kn heading 175° · heard 3 min ago" (or "At the dock"), fished-12 h.
+  6:39 AM · 12.9 kn heading 175° · heard 3 min ago" (or "At the dock"), fished-12 h. Silent
+  over an hour (out of range, or AIS off at the spot): "Last heard here 12:36 AM, going 10.0 kn
+  heading 256° · 7 h 48 min ago" — the marker is its last known spot, not where it is.
 - `js/grid.js`, `js/render.js` — ports of SSTGrid / SSTRenderer (palette, scale,
   marching-squares isotherms). Since 2026-11-19 the water image is upsampled (up to 6 px
   per 1-km cell, ≤2400 px wide, bilinear between readings, skipping land) after the water

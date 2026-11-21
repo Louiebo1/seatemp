@@ -56,10 +56,22 @@ export function departure(points, parties, now) {
   for (let i = all.length - 1; i >= 0; i--) {
     if (!atDock(all[i], parties, knotsAt(i))) continue;
     if (i === all.length - 1) return { docked: true };
-    return { after: all[i][0], by: all[i + 1][0] };
+    const dock = all[i], away = all[i + 1];
+    const out = { after: dock[0], by: away[0] };
+    // A long silence, but first heard already running: back it up by distance over speed
+    // to about when it left (the Eldorado: last at the dock 5:31 PM, heard 8.5 nm out at
+    // 11:45 PM doing 9.5 kn → about 10:50 PM).
+    if (out.by - out.after > 20 * 60 && away[3] >= RUNNING_KN) {
+      const back = nm(dock[1], dock[2], away[1], away[2]) / away[3] * 3600;
+      const about = Math.round((out.by - back) / 300) * 300;
+      if (about > out.after && about < out.by) out.about = about;
+    }
+    return out;
   }
   return null;
 }
+/** Heard this fast just after a silence, a boat is taken to have been running straight out. */
+const RUNNING_KN = 5;
 
 /** How long (seconds) the boat spent fishing-slow away from its dock in these points. */
 export function fishingSeconds(points, parties) {

@@ -373,18 +373,29 @@ function boatReadout(b) {
   const party = partyOf(b);
   const temp = state.map && state.map.grid.fahrenheitAt(b.lat, b.lon);
   const ago = Math.floor((Date.now() - b.seen) / 60e3);
-  const heard = ago < 1 ? 'heard just now' : `heard ${ago < 60 ? `${ago} min` : `${Math.floor(ago / 60)} h ${ago % 60} min`} ago`;
+  const agoText = ago < 60 ? `${ago} min` : `${Math.floor(ago / 60)} h ${ago % 60} min`;
+  // Silent over an hour: the boat is drawn where it was last heard, not where it is.
+  const silent = ago >= 60;
+  let heard = ago < 1 ? 'heard just now' : `heard ${agoText} ago`;
   const who = party.length ? party.map(p => `${p.landing} · ${p.city}`).join(' or ') : typeName(b.type);
   // The trip: when it left the landing (party boats: their trails show it).
   const trip = [];
   const points = party.length && state.trails.get(b.mmsi);
   const left = party.length && departure(points, party, [b.seen / 1000, b.lat, b.lon, b.sog]);
   if (left && left.docked) trip.push('At the dock');
-  else if (left) trip.push(left.by - left.after <= 20 * 60 ? `Left the landing ${clock(left.by)}` : `Left the landing between ${clock(left.after)} and ${clock(left.by)}`);
-  if (!(left && left.docked) && b.sog != null) {
+  else if (left) trip.push(left.by - left.after <= 20 * 60 ? `Left the landing ${clock(left.by)}`
+    : left.about ? `Left the landing about ${clock(left.about)}`
+    : `Left the landing between ${clock(left.after)} and ${clock(left.by)}`);
+  const docked = left && left.docked;
+  let motion = '';
+  if (!docked && b.sog != null) {
     const heading = b.cog != null && b.sog > 0.5 ? ` heading ${String(Math.round(b.cog)).padStart(3, '0')}°` : '';
-    trip.push(b.sog < 0.5 ? 'stopped' : `${b.sog.toFixed(1)} kn${heading}`);
+    motion = b.sog < 0.5 ? 'stopped' : `${b.sog.toFixed(1)} kn${heading}`;
   }
+  if (silent && !docked) {
+    trip.push(`Last heard here ${clock(b.seen / 1000)}${motion ? `, ${motion === 'stopped' ? 'stopped' : `going ${motion}`}` : ''}`);
+    heard = `${agoText} ago`;
+  } else if (motion) trip.push(motion);
   const more = [];
   if (points && points.length > 1) {
     const day = points.filter(p => p[0] >= Date.now() / 1000 - 12 * 3600);
