@@ -45,6 +45,22 @@ export function mergeTrails(trails, fresh, now = Date.now()) {
   }
 }
 
+/** When the boat left its landing, from its trail (with `now`, its live position, as the
+ *  last point): { docked: true } when it's at the dock now; { after, by } (seconds) when
+ *  it's out — it was last at the dock at `after` and first heard away at `by` (the same
+ *  moment, near enough, when they're close together); null when the trail doesn't show it
+ *  leaving (it left more than 72 hours ago, or wasn't heard at the dock). */
+export function departure(points, parties, now) {
+  const all = now ? [...(points || []), now] : points || [];
+  const knotsAt = i => (i ? stretchKnots(all[i - 1], all[i]) : all[0][3] ?? 0);
+  for (let i = all.length - 1; i >= 0; i--) {
+    if (!atDock(all[i], parties, knotsAt(i))) continue;
+    if (i === all.length - 1) return { docked: true };
+    return { after: all[i][0], by: all[i + 1][0] };
+  }
+  return null;
+}
+
 /** How long (seconds) the boat spent fishing-slow away from its dock in these points. */
 export function fishingSeconds(points, parties) {
   let total = 0;

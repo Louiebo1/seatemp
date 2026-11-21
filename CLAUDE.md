@@ -66,7 +66,13 @@ ES modules, no build step. Family only: a passcode, asked once per device.
   `tools/party_from_app.py` (KNOWN_PINS is hand-kept, same as the app's `knownPins`).
 - `js/trails.js` — trail speed classes (≤4 kn fishing = thick pink, ≤10 trolling = yellow,
   faster = thin white; dotted across a 30 min–6 h silence; dock points skipped), merging,
-  "fished X in the last 12 h". Trails setting `seatemp.trails` (12/24/72 h, 0 = tapped boat only).
+  "fished X in the last 12 h", `departure` (when it left the landing: the last at-dock point
+  and the next one; shown as one time when ≤ 20 min apart, else "between …"). Trails setting
+  `seatemp.trails` (12/24/72 h, 0 = tapped boat only).
+- Boats and trails are always live, whatever map day is shown (Louie asked 2026-11-21 why a
+  boat said "36 min ago" on Thursday's map): the day bar says "Older map · boats are live"
+  and a tapped boat says so too. Tapped boat: name + °F, landing · city, "Left the landing
+  6:39 AM · 12.9 kn heading 175° · heard 3 min ago" (or "At the dock"), fished-12 h.
 - `js/grid.js`, `js/render.js` — ports of SSTGrid / SSTRenderer (palette, scale,
   marching-squares isotherms). Since 2026-11-19 the water image is upsampled (up to 6 px
   per 1-km cell, ≤2400 px wide, bilinear between readings, skipping land) after the water

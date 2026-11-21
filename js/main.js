@@ -7,7 +7,7 @@ import { renderMap, STOPS } from './render.js';
 import { COAST } from './coast-data.js';
 import { MapView } from './map.js';
 import { PARTY_BOATS, partyOf as partyByName } from './party.js';
-import { mergeTrails, fishingSeconds } from './trails.js';
+import { mergeTrails, fishingSeconds, departure } from './trails.js';
 import { call, unlock, forget, isUnlocked, Locked } from './api.js';
 
 const $ = id => document.getElementById(id);
@@ -172,7 +172,7 @@ function renderChrome() {
   const fmt = day => new Date(day + 'T00:00:00Z').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
   $('day').textContent = state.day ? fmt(state.day) : '—';
   const latest = state.day && state.day === state.latest;
-  $('dayNote').textContent = latest ? 'Newest map' : state.day ? 'Older map' : ' ';
+  $('dayNote').textContent = latest ? 'Newest map' : !state.day ? ' ' : state.mode === 'off' ? 'Older map' : 'Older map · boats are live';
   $('dayNote').className = 'note ' + (latest ? 'green' : 'orange');
   $('prev').disabled = !state.day;
   $('next').disabled = !state.day || latest;
@@ -284,6 +284,7 @@ $('mode').onchange = () => {
   state.mode = $('mode').value;
   setPref('mode', state.mode);
   showChoices();
+  renderChrome();
   boatPolls = 0;
   pollBoats();
   drawLayers();
@@ -372,19 +373,37 @@ function boatReadout(b) {
   const party = partyOf(b);
   const temp = state.map && state.map.grid.fahrenheitAt(b.lat, b.lon);
   const ago = Math.floor((Date.now() - b.seen) / 60e3);
-  const details = [party.length ? party.map(p => p.landing).join(' or ') : typeName(b.type)];
-  if (b.sog != null) details.push(`${b.sog.toFixed(1)} kn`);
-  if (b.cog != null && (b.sog || 0) > 0.5) details.push(`${String(Math.round(b.cog)).padStart(3, '0')}°`);
-  details.push(ago < 1 ? 'just now' : ago < 60 ? `${ago} min ago` : `${Math.floor(ago / 60)} h ${ago % 60} min ago`);
+  const heard = ago < 1 ? 'heard just now' : `heard ${ago < 60 ? `${ago} min` : `${Math.floor(ago / 60)} h ${ago % 60} min`} ago`;
+  const who = party.length ? party.map(p => `${p.landing} · ${p.city}`).join(' or ') : typeName(b.type);
+  // The trip: when it left the landing (party boats: their trails show it).
+  const trip = [];
   const points = party.length && state.trails.get(b.mmsi);
+  const left = party.length && departure(points, party, [b.seen / 1000, b.lat, b.lon, b.sog]);
+  if (left && left.docked) trip.push('At the dock');
+  else if (left) trip.push(left.by - left.after <= 20 * 60 ? `Left the landing ${clock(left.by)}` : `Left the landing between ${clock(left.after)} and ${clock(left.by)}`);
+  if (!(left && left.docked) && b.sog != null) {
+    const heading = b.cog != null && b.sog > 0.5 ? ` heading ${String(Math.round(b.cog)).padStart(3, '0')}°` : '';
+    trip.push(b.sog < 0.5 ? 'stopped' : `${b.sog.toFixed(1)} kn${heading}`);
+  }
+  const more = [];
   if (points && points.length > 1) {
     const day = points.filter(p => p[0] >= Date.now() / 1000 - 12 * 3600);
     const s = fishingSeconds(day, party);
-    if (s >= 600) details.push(`fished ${s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.round(s % 3600 / 60)} min` : `${Math.round(s / 60)} min`} in the last 12 h`);
+    if (s >= 600) more.push(`Fished ${s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.round(s % 3600 / 60)} min` : `${Math.round(s / 60)} min`} in the last 12 h`);
   }
+  if (state.day && state.day !== state.latest) more.push('The boat is live now; the water is from the older map');
   const color = party.length ? 'yellow' : b.type === 30 ? 'orange' : 'muted';
   return `<div><span class="${color}">${ICON.boat}</span> <b>${esc(party.length ? party[0].name : b.name || `MMSI ${b.mmsi}`)}</b>${temp != null ? ` <b class="mono">${temp.toFixed(1)}°F</b>` : ''}</div>
-          <div class="small muted">${esc(details.join(' · '))}</div>`;
+          <div class="small muted">${esc(who)}</div>
+          <div class="small">${esc(trip.join(' · '))}${trip.length ? ' · ' : ''}<span class="${ago < 15 ? 'green' : 'orange'}">${heard}</span></div>
+          ${more.length ? `<div class="small muted">${esc(more.join(' · '))}</div>` : ''}`;
+}
+
+/** A time of day ("6:39 AM"), with the weekday when it wasn't today ("Fri 9:23 AM"). */
+function clock(seconds) {
+  const d = new Date(seconds * 1000);
+  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString('en-US', { weekday: 'short' })} ${time}`;
 }
 
 function eventReadout(e) {
